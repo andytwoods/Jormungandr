@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.cache/
+
+# Vite
+*.local
+.vite/
+
+# TypeScript
+*.tsbuildinfo
+
+# Environment variables
+.env
+.env.*
+
+# Test coverage
+coverage/
+
+# IDE – JetBrains
+.idea/
+
+# macOS
+.DS_Store
