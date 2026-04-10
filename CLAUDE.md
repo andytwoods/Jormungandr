@@ -64,8 +64,8 @@ These are **frozen** — do not re-litigate them.
 ### Controls
 Planet-relative, not screen-relative. "Left" always means counter-clockwise + away from surface. "Right" always means clockwise + away from surface. This is consistent at every position on the globe.
 
-- `A` / left arrow → counter-clockwise + outward thrust (45° diagonal)
-- `D` / right arrow → clockwise + outward thrust (45° diagonal)
+- `A` / left arrow → counter-clockwise + outward thrust (60° from tangent toward radial)
+- `D` / right arrow → clockwise + outward thrust (60° from tangent toward radial)
 - Both → pure radial-outward thrust
 - Mobile: left/right screen halves mirror desktop
 
@@ -115,7 +115,9 @@ All of these must be named constants in `src/game/config.ts`, never magic number
 | `GRAVITY` | 900 |
 | `THRUST_DIAGONAL` | 1150 |
 | `THRUST_RADIAL` | 1250 |
-| `DAMPING` | 0.6 |
+| `DAMPING` | 0.15 |
+| `THRUST_ANGLE_DEG` | 60 |
+| `MIN_TANGENTIAL_SPEED` | 80 |
 | `MAX_SPEED` | 520 |
 | `SPAWN_ALTITUDE` | 60 |
 | `SPAWN_INITIAL_SPEED` | 200 |
