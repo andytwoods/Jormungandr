@@ -891,16 +891,16 @@ These values are starting points and should be exposed in a tuning config.
 **No constant forward speed.** The serpent does not move automatically. It moves only from inertia retained from previous thrust, opposed by gravity and damping. On each frame, apply: `velocity += gravity_vector * dt`, then `velocity += thrust_vector * dt` (if input held), then `velocity *= (1 - damping * dt)`, then clamp to max speed. There is no separate "forward speed" component. Orbital motion accumulates naturally from repeated directional thrust.
 
 * gravity strength toward planet centre: **900 units/s²**
-* left thrust vector: **planet-relative** — 60° from counter-clockwise tangent toward radial-outward, magnitude **1150 units/s²**
-* right thrust vector: **planet-relative** — 60° from clockwise tangent toward radial-outward, magnitude **1150 units/s²**
-* both pressed thrust vector: pure radial-outward (directly away from planet centre), magnitude **1250 units/s²**
+* left thrust vector: **planet-relative** — 45° from counter-clockwise tangent toward radial-outward, magnitude **1350 units/s²**
+* right thrust vector: **planet-relative** — 45° from clockwise tangent toward radial-outward, magnitude **1350 units/s²**
+* both pressed thrust vector: pure radial-outward (directly away from planet centre), magnitude **1400 units/s²**
 * linear damping: **0.15 /s** — genuinely mild; retains ~86% velocity per second; preserves orbital momentum between thrusts
 * maximum speed clamp: **520 units/s**
 * minimum tangential speed floor: **80 units/s** — if the tangential component of velocity drops below this, apply a gentle tangential nudge in the current dominant orbital direction to prevent the hover-correction loop
 * input model: **planet-relative, not screen-relative** — decided
 * movement feel target: slightly heavy, controllable, arcade-like
 
-**Thrust angle rationale:** At 45°, the radial component of left/right thrust is 1150 × sin(45°) ≈ 813 units/s² — insufficient to overcome gravity (900 units/s²) on a single button. At 60°, the radial component is 1150 × sin(60°) ≈ 996 units/s², which slightly overcomes gravity with one button and clearly overcomes it with both. This makes single-button thrust meaningful for altitude recovery, not just steering.
+**Thrust angle rationale:** 45° gives equal orbital and radial components (955 units/s² each at 1350 magnitude), making left and right feel clearly distinct — one swings you counter-clockwise, the other clockwise. The radial component (955) comfortably overcomes gravity (900) so a single button can maintain altitude. Both-pressed gives pure radial lift at 1400 units/s².
 
 **Why planet-relative – decided:** "Left" always means counter-clockwise + away from the planet surface. "Right" always means clockwise + away from the planet surface. This keeps the muscle memory ("press = go away from danger") consistent regardless of where on the globe the serpent is. Screen-relative controls were considered and rejected: at the 6 o'clock position, screen-left thrust would angle toward the planet surface, which reads as a bug rather than a challenge.
 
