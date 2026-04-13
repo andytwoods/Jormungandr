@@ -276,8 +276,6 @@ export class GameScene extends Phaser.Scene {
       this.growth.onFoodEaten(nowMs, 7)
       this.recomputeStats()
       this.scoreText.setText(`score: ${this.score}`)
-    } else {
-      this.debugFeedTapped = false
     }
 
     const inputState = this.inputSys.getState()
