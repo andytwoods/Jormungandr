@@ -17,4 +17,12 @@ const config: Phaser.Types.Core.GameConfig = {
   scene: [BootScene, GameScene],
 }
 
-new Phaser.Game(config)
+const game = new Phaser.Game(config)
+
+game.events.once(Phaser.Core.Events.READY, () => {
+  const loader = document.getElementById('loader')
+  if (loader) {
+    loader.classList.add('fade-out')
+    loader.addEventListener('transitionend', () => loader.remove(), { once: true })
+  }
+})

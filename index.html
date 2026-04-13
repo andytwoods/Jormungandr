@@ -11,9 +11,71 @@
       * { margin: 0; padding: 0; box-sizing: border-box; }
       body { background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; width: 100vw; height: 100vh; }
       canvas { display: block; }
+
+      #loader {
+        position: fixed; inset: 0; z-index: 100;
+        background: #000;
+        display: flex; align-items: center; justify-content: center;
+        flex-direction: column; gap: 32px;
+        transition: opacity 0.4s ease;
+      }
+      #loader.fade-out { opacity: 0; pointer-events: none; }
+
+      .planet-ring {
+        position: relative;
+        width: 120px; height: 120px;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .planet {
+        width: 48px; height: 48px; border-radius: 50%;
+        background: radial-gradient(circle at 35% 35%, #2a4a6b, #0d1f33);
+        box-shadow: 0 0 18px #1a6ea8, 0 0 40px #0a3a5a;
+      }
+      .orbit-track {
+        position: absolute; inset: 0; border-radius: 50%;
+        border: 1px dashed rgba(255,255,255,0.1);
+        animation: spin 1.6s linear infinite;
+      }
+      .serpent-head {
+        position: absolute;
+        width: 12px; height: 12px; border-radius: 50%;
+        background: #00e87a;
+        box-shadow: 0 0 8px #00e87a, 0 0 16px #00e87a;
+        top: -6px; left: calc(50% - 6px);
+      }
+
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      .loader-title {
+        font-family: 'Courier New', Courier, monospace;
+        font-size: clamp(18px, 4vw, 28px);
+        letter-spacing: 0.25em;
+        color: #fff;
+        text-shadow: 0 0 12px rgba(0,232,122,0.6);
+      }
+      .loader-sub {
+        font-family: 'Courier New', Courier, monospace;
+        font-size: 11px;
+        letter-spacing: 0.3em;
+        color: rgba(255,255,255,0.4);
+      }
+      .loader-sub .dot { animation: blink 1.2s step-start infinite; }
+      .loader-sub .dot:nth-child(2) { animation-delay: 0.4s; }
+      .loader-sub .dot:nth-child(3) { animation-delay: 0.8s; }
+      @keyframes blink { 0%,100% { opacity: 0; } 50% { opacity: 1; } }
     </style>
   </head>
   <body>
+    <div id="loader">
+      <div class="planet-ring">
+        <div class="planet"></div>
+        <div class="orbit-track">
+          <div class="serpent-head"></div>
+        </div>
+      </div>
+      <div class="loader-title">JORMUNGANDR</div>
+      <div class="loader-sub">LOADING<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
