@@ -10,6 +10,10 @@ const config: Phaser.Types.Core.GameConfig = {
   antialias: true,
   roundPixels: false,
   fps: { target: TARGET_FPS, forceSetTimeOut: false },
+  input: {
+    activePointers: 3,
+    touch: { capture: true },
+  },
   scale: {
     mode: Phaser.Scale.RESIZE,   // canvas fills the window; game world zoom handles scale
     autoCenter: Phaser.Scale.CENTER_BOTH,
