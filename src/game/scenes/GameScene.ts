@@ -22,7 +22,8 @@ import {
   LAVA_BLOB_SPEED, LAVA_BLOB_SPREAD, LAVA_BLOB_COUNT,
   LAVA_BLOB_RADIUS, LAVA_BLOB_LIFE_MS, LAVA_ERUPT_INTERVAL_MS,
   GRAVITY, CAMERA_ZOOM_MIN, CAMERA_ZOOM_FULL_SCORE,
-  MOON_X, MOON_Y, MOON_RADIUS, FOOD_TYPES
+  MOON_X, MOON_Y, MOON_RADIUS, MOON_GRAVITY, MOON_SOI, MOON_UNLOCK_SCORE,
+  HEAD_COLLISION_RADIUS, FOOD_TYPES
 } from '../config'
 
 const CENTRE = { x: 0, y: 0 }
@@ -259,6 +260,18 @@ export class GameScene extends Phaser.Scene {
     // Physics
     updateMovement(this.head, inputState, dtSec, this.movementStats)
 
+    // Moon gravity — only once the snake is large enough to feel it
+    if (this.score >= MOON_UNLOCK_SCORE) {
+      const mdx = this.head.position.x - MOON_X
+      const mdy = this.head.position.y - MOON_Y
+      const mdist = Math.sqrt(mdx * mdx + mdy * mdy)
+      if (mdist > 0 && mdist < MOON_SOI) {
+        const pull = MOON_GRAVITY * Math.pow(1 - mdist / MOON_SOI, 0.6)
+        this.head.velocity.x -= (mdx / mdist) * pull * dtSec
+        this.head.velocity.y -= (mdy / mdist) * pull * dtSec
+      }
+    }
+
     // Lava eruptions + blob physics
     this.updateLava(nowMs, dtSec)
 
@@ -271,8 +284,30 @@ export class GameScene extends Phaser.Scene {
     // Get current body samples for collision and rendering
     const samples = this.body.getSamples(this.body.visibleSampleCount)
 
-    // Collision checks
-    const cause = checkDeath(this.head.position.x, this.head.position.y, samples, this.hazards)
+    // Hazard collision — eat it if head is bigger, die otherwise
+    const hxPos = this.head.position.x, hyPos = this.head.position.y
+    const headRadius = this.bodyHeadWidth() / 2
+    for (let i = this.hazards.length - 1; i >= 0; i--) {
+      const h = this.hazards[i]
+      const hdx = hxPos - h.worldX, hdy = hyPos - h.worldY
+      if (Math.sqrt(hdx * hdx + hdy * hdy) < HEAD_COLLISION_RADIUS + h.collisionRadius) {
+        if (headRadius > h.collisionRadius) {
+          // Snake is big enough — devour the hazard
+          this.hazards.splice(i, 1)
+          this.score++
+          this.foodsSinceLastHazard++
+          this.growth.onFoodEaten(nowMs, 3)
+          this.recomputeStats()
+          this.scoreText.setText(`score: ${this.score}`)
+          this.cameras.main.shake(80, 0.005)
+        } else {
+          this.triggerDeath(nowMs); return
+        }
+      }
+    }
+
+    // Surface + self-collision (hazards already handled above)
+    const cause = checkDeath(this.head.position.x, this.head.position.y, samples, [])
     if (cause !== null) { this.triggerDeath(nowMs); return }
 
     const hx = this.head.position.x, hy = this.head.position.y
@@ -326,7 +361,7 @@ export class GameScene extends Phaser.Scene {
 
     // Zoom out as score grows — reveals moon progressively
     const scoreFrac = Math.min(1, this.score / CAMERA_ZOOM_FULL_SCORE)
-    const targetZoom = lerp(this.baseZoom, CAMERA_ZOOM_MIN, scoreFrac * scoreFrac)
+    const targetZoom = lerp(this.baseZoom, CAMERA_ZOOM_MIN, scoreFrac)
     this.currentZoom = lerp(this.currentZoom, targetZoom, 0.02)
     this.cameras.main.setZoom(this.currentZoom)
   }
@@ -427,9 +462,25 @@ export class GameScene extends Phaser.Scene {
   private renderMoon(g: Phaser.GameObjects.Graphics): void {
     const mx = MOON_X, my = MOON_Y, R = MOON_RADIUS
 
-    // Outer atmospheric haze
-    g.fillStyle(0x8899aa, 0.08)
-    g.fillCircle(mx, my, R + 18)
+    // Sphere of influence — brightens once moon gravity is unlocked
+    const soiAlpha = this.score >= MOON_UNLOCK_SCORE ? 0.45 : 0.18
+    const soiCol   = this.score >= MOON_UNLOCK_SCORE ? 0x88ccff : 0x445566
+    g.lineStyle(this.score >= MOON_UNLOCK_SCORE ? 1.5 : 1, soiCol, soiAlpha)
+    g.strokeCircle(mx, my, MOON_SOI)
+
+    // Thick layered atmosphere — 6 halos fading outward
+    const atmoLayers = [
+      { r: R + 90, a: 0.04, col: 0x99bbcc },
+      { r: R + 65, a: 0.07, col: 0x88aacc },
+      { r: R + 45, a: 0.11, col: 0x7799bb },
+      { r: R + 28, a: 0.16, col: 0x6688aa },
+      { r: R + 15, a: 0.22, col: 0x8899bb },
+      { r: R + 6,  a: 0.30, col: 0xaabbcc },
+    ]
+    for (const l of atmoLayers) {
+      g.fillStyle(l.col, l.a)
+      g.fillCircle(mx, my, l.r)
+    }
 
     // Base — dark grey
     g.fillStyle(0x6a6a72)
@@ -468,12 +519,9 @@ export class GameScene extends Phaser.Scene {
     g.fillStyle(0x111118, 0.35)
     g.fillCircle(mx - R * 0.28, my, R * 0.85)
 
-    // "Moon" label — tiny, fades in with zoom-out
-    const labelAlpha = Math.max(0, Math.min(1, (this.baseZoom - this.currentZoom) / (this.baseZoom - CAMERA_ZOOM_MIN) * 2 - 0.2))
-    if (labelAlpha > 0.05) {
-      g.lineStyle(1, 0x8899aa, labelAlpha * 0.6)
-      g.strokeCircle(mx, my, R + 10)
-    }
+    // Orbital ring — always visible as a navigation beacon
+    g.lineStyle(1, 0x8899aa, 0.4)
+    g.strokeCircle(mx, my, R + 12)
   }
 
   private renderSkyBoundary(g: Phaser.GameObjects.Graphics): void {

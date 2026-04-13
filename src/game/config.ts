@@ -76,12 +76,15 @@ export const CAMERA_SMOOTHING = 0.12
 export const CAMERA_BASE_ZOOM = 0.49    // px per world unit at 480×270
 export const CAMERA_MAX_ZOOM_OUT = 0.42 // unused legacy — zoom now driven by score
 export const CAMERA_ZOOM_MIN = 0.10     // fully zoomed out (moon clearly visible)
-export const CAMERA_ZOOM_FULL_SCORE = 30  // score at which max zoom-out is reached
+export const CAMERA_ZOOM_FULL_SCORE = 20  // score at which max zoom-out is reached
 
 // Celestial bodies
-export const MOON_X = 400
-export const MOON_Y = -1300
-export const MOON_RADIUS = 110
+export const MOON_UNLOCK_SCORE = 6    // score at which moon gravity kicks in [TUNING]
+export const MOON_X = 300
+export const MOON_Y = -900
+export const MOON_RADIUS = 130
+export const MOON_GRAVITY = 700         // units/s² at moon surface
+export const MOON_SOI = 580             // sphere of influence radius (gravitational pull range)
 export const INTERNAL_WIDTH = 480
 export const INTERNAL_HEIGHT = 270
 
