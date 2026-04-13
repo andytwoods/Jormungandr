@@ -14,15 +14,20 @@ export interface MovementStats {
   maxSpeed: number
   minTangentialSpeed: number
   playableAltMax: number
+  // Active gravity body — set to moon when inside lunar SOI
+  activeCentre: { x: number; y: number }
+  activeSurfaceRadius: number
+  activeGravity: number
 }
-
-const CENTRE = { x: 0, y: 0 }
 
 export function baseMovementStats(): MovementStats {
   return {
     maxSpeed: MAX_SPEED,
     minTangentialSpeed: MIN_TANGENTIAL_SPEED,
     playableAltMax: PLAYABLE_ALT_MAX,
+    activeCentre: { x: 0, y: 0 },
+    activeSurfaceRadius: PLANET_RADIUS,
+    activeGravity: GRAVITY,
   }
 }
 
@@ -31,19 +36,20 @@ export function updateMovement(head: SerpentHead, input: InputState, dtSec: numb
   const pos = head.position
   const vel = head.velocity
 
-  // Radial outward unit vector
-  const radial = radialUnit(pos, CENTRE)
+  const centre = stats.activeCentre
 
-  // --- Gravity (toward centre) ---
-  vel.x += -radial.x * GRAVITY * dtSec
-  vel.y += -radial.y * GRAVITY * dtSec
+  // Radial outward unit vector relative to active body
+  const radial = radialUnit(pos, centre)
 
-  // --- Thrust ---
-  const alt = altitude(pos, CENTRE, PLANET_RADIUS)
+  // --- Gravity toward active body centre ---
+  vel.x += -radial.x * stats.activeGravity * dtSec
+  vel.y += -radial.y * stats.activeGravity * dtSec
+
+  // --- Thrust (radial from active body) ---
+  const alt = altitude(pos, centre, stats.activeSurfaceRadius)
   const thrustFactor = alt > stats.playableAltMax ? THIN_ATMOSPHERE_THRUST_FACTOR : 1.0
 
   if (upHeld) {
-    // Space: pure radial outward
     vel.x += radial.x * THRUST_RADIAL * thrustFactor * dtSec
     vel.y += radial.y * THRUST_RADIAL * thrustFactor * dtSec
   }
@@ -53,7 +59,7 @@ export function updateMovement(head: SerpentHead, input: InputState, dtSec: numb
   vel.x *= dampFactor
   vel.y *= dampFactor
 
-  // --- Minimum tangential speed floor ---
+  // --- Minimum tangential speed floor (relative to active body) ---
   const cwTang = tangentUnit(radial, true)
   const tangentialSpeed = dot(vel, cwTang)
   const absSpeed = Math.abs(tangentialSpeed)

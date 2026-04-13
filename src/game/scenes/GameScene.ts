@@ -53,10 +53,10 @@ const COL_LAND_DEEP    = 0x1a3d0a
 const COL_LAND         = 0x2d7a16
 const COL_POLAR_ICE    = 0xdcf0ff
 const COL_PLANET_RIM   = 0x2a4a2a
-const COL_BODY       = 0x3a8a1a
-const COL_BODY_DARK  = 0x2a5a0a
-const COL_HEAD       = 0x7fff00
-const COL_EYE        = 0x001a00
+const COL_BODY       = 0x48d1cc
+const COL_BODY_DARK  = 0x008b8b
+const COL_HEAD       = 0x7fffd4
+const COL_EYE        = 0x002e2e
 
 
 const COL_PULSE      = 0xffffff
@@ -228,6 +228,7 @@ export class GameScene extends Phaser.Scene {
   private recomputeStats(): void {
     const f = this.score
     this.movementStats = {
+      ...this.movementStats,
       maxSpeed:           MAX_SPEED            + f * 30,   // +30 speed per food
       minTangentialSpeed: MIN_TANGENTIAL_SPEED + f * 12,   // +12 orbital floor per food
       playableAltMax:     PLAYABLE_ALT_MAX     + f * 20,   // +20 altitude ceiling per food
@@ -945,8 +946,8 @@ export class GameScene extends Phaser.Scene {
       const t = (i + 0.5) / (total - 1)
       const light = Math.floor(i / 3) % 2 === 0
       const col = t < 0.5
-        ? (light ? 0x4aaa1a : COL_BODY)
-        : (light ? 0x3a7a0a : COL_BODY_DARK)
+        ? (light ? 0x7fffd4 : COL_BODY)
+        : (light ? 0x40e0d0 : COL_BODY_DARK)
       g.fillStyle(col)
       g.beginPath()
       g.moveTo(lx[i],     ly[i])
@@ -955,12 +956,19 @@ export class GameScene extends Phaser.Scene {
       g.lineTo(lx[i + 1], ly[i + 1])
       g.closePath()
       g.fillPath()
+
+      // Small scale highlight in the middle of each band
+      if (i % 3 === 1) {
+        const w = lerp(headWidth / 2, tailWidth / 2, t)
+        g.fillStyle(0xffffff, 0.12)
+        g.fillCircle(samples[i].x, samples[i].y, w * 0.5)
+      }
     }
 
     // Scale divider lines
     for (let i = 3; i < total - 1; i += 3) {
       const alpha = lerp(0.45, 0.08, i / (total - 1))
-      g.lineStyle(1, 0x1a5008, alpha)
+      g.lineStyle(1, 0x004d4d, alpha)
       g.beginPath()
       g.moveTo(lx[i], ly[i])
       g.lineTo(rx[i], ry[i])
@@ -972,7 +980,7 @@ export class GameScene extends Phaser.Scene {
     g.fillCircle(samples[total - 1].x, samples[total - 1].y, tailWidth / 2)
 
     // Edge outlines
-    g.lineStyle(1, 0x1a5008, 0.6)
+    g.lineStyle(1, 0x004d4d, 0.6)
     g.beginPath()
     g.moveTo(lx[0], ly[0])
     for (let i = 1; i < total; i++) g.lineTo(lx[i], ly[i])
@@ -1022,7 +1030,7 @@ export class GameScene extends Phaser.Scene {
     g.closePath()
     g.fillPath()
 
-    g.lineStyle(1.5, 0x4aaa00, 1)
+    g.lineStyle(1.5, 0x00ced1, 1)
     g.beginPath()
     g.moveTo(tipX, tipY)
     g.lineTo(midX  + perp.x * R,       midY  + perp.y * R)
