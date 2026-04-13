@@ -84,6 +84,10 @@ export class GameScene extends Phaser.Scene {
   private deathScoreText!: Phaser.GameObjects.Text
   private deathBestText!: Phaser.GameObjects.Text
 
+  // TODO: remove debug key before release
+  private debugFeedKey!: Phaser.Input.Keyboard.Key
+  private debugFeedTapped = false
+
   // Camera follow target
   private camTarget!: Phaser.GameObjects.Container
   private currentZoom = CAMERA_BASE_ZOOM
@@ -116,6 +120,14 @@ export class GameScene extends Phaser.Scene {
     this.camTarget = this.add.container(this.head.position.x, this.head.position.y)
     this.cameras.main.startFollow(this.camTarget, false, CAMERA_SMOOTHING, CAMERA_SMOOTHING)
     this.cameras.main.setZoom(this.currentZoom)
+
+    // TODO: remove debug key before release
+    this.debugFeedKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.G)
+    this.input.on('pointerdown', (ptr: Phaser.Input.Pointer) => {
+      if (ptr.x > this.cameras.main.width * 0.75 && ptr.y < this.cameras.main.height * 0.25) {
+        this.debugFeedTapped = true
+      }
+    })
 
     // Graphics layer (drawn every frame)
     this.gfx = this.add.graphics()
@@ -215,7 +227,7 @@ export class GameScene extends Phaser.Scene {
       b.vx += -(b.x / len) * GRAVITY * dtSec
       b.vy += -(b.y / len) * GRAVITY * dtSec
       b.x  += b.vx * dtSec
-      b.y  += b.vy * dtSec
+      b.y  += b.y * dtSec
 
       // Remove if hit surface
       if (Math.sqrt(b.x * b.x + b.y * b.y) < PLANET_RADIUS) {
@@ -256,22 +268,45 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updatePlaying(nowMs: number, dtSec: number): void {
+    // TODO: remove debug key before release — G or top-right tap gives 7 food points instantly
+    if (Phaser.Input.Keyboard.JustDown(this.debugFeedKey) || this.debugFeedTapped) {
+      this.debugFeedTapped = false
+      this.score += 7
+      this.foodsSinceLastHazard += 7
+      this.growth.onFoodEaten(nowMs, 7)
+      this.recomputeStats()
+      this.scoreText.setText(`score: ${this.score}`)
+    } else {
+      this.debugFeedTapped = false
+    }
+
     const inputState = this.inputSys.getState()
 
-    // Physics
-    updateMovement(this.head, inputState, dtSec, this.movementStats)
+    // Determine active gravitational body for thrust and tangential speed calculations
+    let currentActiveCentre = { x: 0, y: 0 }; // Default to Earth
+    let currentActiveSurfaceRadius = PLANET_RADIUS;
+    let currentActiveGravity = GRAVITY;
 
-    // Moon gravity — only once the snake is large enough to feel it
     if (this.score >= MOON_UNLOCK_SCORE) {
       const mdx = this.head.position.x - MOON_X
       const mdy = this.head.position.y - MOON_Y
       const mdist = Math.sqrt(mdx * mdx + mdy * mdy)
+
       if (mdist > 0 && mdist < MOON_SOI) {
-        const pull = MOON_GRAVITY * Math.pow(1 - mdist / MOON_SOI, 0.6)
-        this.head.velocity.x -= (mdx / mdist) * pull * dtSec
-        this.head.velocity.y -= (mdy / mdist) * pull * dtSec
+        // Serpent is within Moon's SOI, switch active body to Moon
+        currentActiveCentre = { x: MOON_X, y: MOON_Y };
+        currentActiveSurfaceRadius = MOON_RADIUS;
+        currentActiveGravity = MOON_GRAVITY; // This is for the thrust calculation, not the actual gravity application
       }
     }
+
+    // Update movementStats for the current frame
+    this.movementStats.activeCentre = currentActiveCentre;
+    this.movementStats.activeSurfaceRadius = currentActiveSurfaceRadius;
+    this.movementStats.activeGravity = currentActiveGravity;
+
+    // Physics
+    updateMovement(this.head, inputState, dtSec, this.movementStats)
 
     // Lava eruptions + blob physics
     this.updateLava(nowMs, dtSec)
@@ -401,7 +436,8 @@ export class GameScene extends Phaser.Scene {
 
   /**
    * Pre-populate the ring buffer with a trail extending behind the head.
-   * Push tail-first so the most recent entry is the head (correct walking order).
+   * Push tail-first so the most recent entry (writePtr-1) is the head.
+   * Trail extends in the direction opposite to initial velocity (CCW at spawn bottom).
    */
   private seedBodyBuffer(): void {
     const hx = this.head.position.x
@@ -687,8 +723,12 @@ export class GameScene extends Phaser.Scene {
 
       if (h.width > 40) {
         // ── Dormant volcano ──────────────────────────────────────────────
-        const hb = h.width * 0.5
+        // Base half-width scales with h.width; sink base 8px into planet so it always overlaps surface
+        const hb = h.width * 0.85
         const ht = h.width * 0.18
+        const sink = 8  // pixels below surface to guarantee overlap
+        const bx = sx - rad.x * sink
+        const by = sy - rad.y * sink
         const topX = sx + rad.x * h.height
         const topY = sy + rad.y * h.height
         const craterR = h.width * 0.14
@@ -703,10 +743,10 @@ export class GameScene extends Phaser.Scene {
         const coneCol = h.volcanoState === 'active' ? 0x2e1a12 : 0x3a3028
         g.fillStyle(coneCol)
         g.beginPath()
-        g.moveTo(sx  - tan.x * hb,        sy  - tan.y * hb)
+        g.moveTo(bx  - tan.x * hb,        by  - tan.y * hb)
         g.lineTo(topX - tan.x * ht,       topY - tan.y * ht)
         g.lineTo(topX + tan.x * ht,       topY + tan.y * ht)
-        g.lineTo(sx  + tan.x * hb,        sy  + tan.y * hb)
+        g.lineTo(bx  + tan.x * hb,        by  + tan.y * hb)
         g.closePath()
         g.fillPath()
 
@@ -717,8 +757,8 @@ export class GameScene extends Phaser.Scene {
             const t = 0.2 + s * 0.3
             const lx1 = topX + tan.x * ht * (t - 0.1)
             const ly1 = topY + tan.y * ht * (t - 0.1)
-            const lx2 = sx   + tan.x * hb * (t + 0.15)
-            const ly2 = sy   + tan.y * hb * (t + 0.15)
+            const lx2 = bx   + tan.x * hb * (t + 0.15)
+            const ly2 = by   + tan.y * hb * (t + 0.15)
             const alpha = h.volcanoState === 'active' ? 0.7 : 0.4
             g.lineStyle(2, 0xff4400, alpha)
             g.beginPath()
@@ -731,8 +771,8 @@ export class GameScene extends Phaser.Scene {
         // Lit flank
         g.fillStyle(0x524438, 0.6)
         g.beginPath()
-        g.moveTo(sx,                       sy)
-        g.lineTo(sx  + tan.x * hb,        sy  + tan.y * hb)
+        g.moveTo(bx,                       by)
+        g.lineTo(bx  + tan.x * hb,        by  + tan.y * hb)
         g.lineTo(topX + tan.x * ht,       topY + tan.y * ht)
         g.lineTo(topX,                     topY)
         g.closePath()

@@ -25,11 +25,11 @@ export class GrowthSystem {
   }
 
   update(nowMs: number, body: SerpentBody): void {
-    // Resolve growth entries
+    // Resolve growth entries — add 1 sample per frame so growth is gradual
     for (const entry of this.queue) {
       if (nowMs >= entry.triggerTime && entry.samplesRemaining > 0) {
-        body.visibleSampleCount += entry.samplesRemaining
-        entry.samplesRemaining = 0
+        body.visibleSampleCount += 1
+        entry.samplesRemaining -= 1
       }
     }
     // Remove resolved entries
