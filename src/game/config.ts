@@ -55,6 +55,14 @@ export const HAZARD_MIN_SPACING_DEG = 20
 export const HAZARD_ADD_INTERVAL = 8    // foods eaten before adding a hazard
 export const HAZARD_SOFT_MAX = 12
 
+// Lava
+export const LAVA_BLOB_SPEED    = 750   // initial radial launch speed
+export const LAVA_BLOB_SPREAD   = 0.35  // angular spread of burst (radians)
+export const LAVA_BLOB_COUNT    = 4     // blobs per eruption
+export const LAVA_BLOB_RADIUS   = 6     // collision + visual radius
+export const LAVA_BLOB_LIFE_MS  = 3500  // max lifespan
+export const LAVA_ERUPT_INTERVAL_MS = 2800  // ms between eruptions
+
 // Camera
 export const CAMERA_SMOOTHING = 0.12
 export const CAMERA_BASE_ZOOM = 0.49    // px per world unit at 480×270

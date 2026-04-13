@@ -7,7 +7,7 @@ import { updateMovement, baseMovementStats, type MovementStats } from '../system
 import { GrowthSystem } from '../systems/GrowthSystem'
 import { checkDeath, checkFoodCollection } from '../systems/CollisionSystem'
 import { spawnFood, generateHazards, addHazard } from '../systems/SpawnSystem'
-import type { FoodItem, GameState } from '../types'
+import type { FoodItem, GameState, LavaBlob } from '../types'
 import {
   radialUnit, tangentUnit, angleFromCentre,
   altitude, lerp, normalize
@@ -18,7 +18,10 @@ import {
   CAMERA_BASE_ZOOM, CAMERA_MAX_ZOOM_OUT, CAMERA_SMOOTHING,
   INITIAL_BODY_SAMPLES, BODY_WIDTH_HEAD, BODY_WIDTH_TAIL,
   FOOD_RADIUS, HAZARD_ADD_INTERVAL, HAZARD_SOFT_MAX,
-  PLAYABLE_ALT_MAX, MAX_SPEED, MIN_TANGENTIAL_SPEED, FOOD_LIFETIME_MS
+  PLAYABLE_ALT_MAX, MAX_SPEED, MIN_TANGENTIAL_SPEED, FOOD_LIFETIME_MS,
+  LAVA_BLOB_SPEED, LAVA_BLOB_SPREAD, LAVA_BLOB_COUNT,
+  LAVA_BLOB_RADIUS, LAVA_BLOB_LIFE_MS, LAVA_ERUPT_INTERVAL_MS,
+  GRAVITY
 } from '../config'
 
 const CENTRE = { x: 0, y: 0 }
@@ -38,8 +41,7 @@ const COL_HEAD       = 0x7fff00
 const COL_EYE        = 0x001a00
 const COL_FOOD       = 0xffd700
 const COL_FOOD_GLOW  = 0xffaa00
-const COL_HAZARD     = 0x4a3018
-const COL_HAZARD_TIP = 0x6a4828
+
 const COL_PULSE      = 0xffffff
 const COL_WARN_TINT  = 0x3a1800
 
@@ -51,6 +53,7 @@ export class GameScene extends Phaser.Scene {
 
   private foods: FoodItem[] = []
   private hazards: HazardRuntime[] = []
+  private lavaBlobs: LavaBlob[] = []
 
   private gameState: GameState = 'PLAYING'
   private score = 0
@@ -158,6 +161,52 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private updateLava(nowMs: number, dtSec: number): void {
+    // Eruptions
+    for (const h of this.hazards) {
+      if (h.volcanoState !== 'active') continue
+      if (nowMs < h.nextEruptionMs) continue
+      h.nextEruptionMs = nowMs + LAVA_ERUPT_INTERVAL_MS + Math.random() * 1000
+
+      const rad = { x: Math.cos(h.angle), y: Math.sin(h.angle) }
+      const craterX = CENTRE.x + rad.x * (PLANET_RADIUS + h.height)
+      const craterY = CENTRE.y + rad.y * (PLANET_RADIUS + h.height)
+
+      for (let i = 0; i < LAVA_BLOB_COUNT; i++) {
+        const spread = (Math.random() - 0.5) * LAVA_BLOB_SPREAD
+        const launchAngle = h.angle + spread
+        const lrad = { x: Math.cos(launchAngle), y: Math.sin(launchAngle) }
+        const speed = LAVA_BLOB_SPEED * (0.75 + Math.random() * 0.5)
+        this.lavaBlobs.push({
+          x: craterX, y: craterY,
+          vx: lrad.x * speed,
+          vy: lrad.y * speed,
+          radius: LAVA_BLOB_RADIUS * (0.7 + Math.random() * 0.6),
+          spawnMs: nowMs,
+        })
+      }
+    }
+
+    // Physics + expiry
+    for (let i = this.lavaBlobs.length - 1; i >= 0; i--) {
+      const b = this.lavaBlobs[i]
+      const age = nowMs - b.spawnMs
+      if (age > LAVA_BLOB_LIFE_MS) { this.lavaBlobs.splice(i, 1); continue }
+
+      // Gravity toward centre
+      const len = Math.sqrt(b.x * b.x + b.y * b.y) || 1
+      b.vx += -(b.x / len) * GRAVITY * dtSec
+      b.vy += -(b.y / len) * GRAVITY * dtSec
+      b.x  += b.vx * dtSec
+      b.y  += b.vy * dtSec
+
+      // Remove if hit surface
+      if (Math.sqrt(b.x * b.x + b.y * b.y) < PLANET_RADIUS) {
+        this.lavaBlobs.splice(i, 1)
+      }
+    }
+  }
+
   /** Re-compute movement + body stats from current score */
   private recomputeStats(): void {
     const f = this.score
@@ -194,6 +243,9 @@ export class GameScene extends Phaser.Scene {
     // Physics
     updateMovement(this.head, inputState, dtSec, this.movementStats)
 
+    // Lava eruptions + blob physics
+    this.updateLava(nowMs, dtSec)
+
     // Push head position into body buffer
     this.body.push(this.head.position.x, this.head.position.y)
 
@@ -205,9 +257,14 @@ export class GameScene extends Phaser.Scene {
 
     // Collision checks
     const cause = checkDeath(this.head.position.x, this.head.position.y, samples, this.hazards)
-    if (cause !== null) {
-      this.triggerDeath(nowMs)
-      return
+    if (cause !== null) { this.triggerDeath(nowMs); return }
+
+    const hx = this.head.position.x, hy = this.head.position.y
+    for (const blob of this.lavaBlobs) {
+      const dx = hx - blob.x, dy = hy - blob.y
+      if (Math.sqrt(dx * dx + dy * dy) < this.bodyHeadWidth() / 2 + blob.radius) {
+        this.triggerDeath(nowMs); return
+      }
     }
 
     // Expire old food and respawn elsewhere
@@ -270,6 +327,7 @@ export class GameScene extends Phaser.Scene {
     this.score = 0
     this.foodsSinceLastHazard = 0
     this.movementStats = baseMovementStats()
+    this.lavaBlobs = []
     this.scoreText.setText('score: 0')
     this.deathPanel.setVisible(false)
     this.growth.reset()
@@ -326,6 +384,7 @@ export class GameScene extends Phaser.Scene {
     this.renderBackground(g, inWarningZone)
     this.renderPlanet(g)
     this.renderHazards(g)
+    this.renderLavaBlobs(g, nowMs)
     this.renderFood(g, nowMs)
 
     const samples = this.body.getSamples(this.body.visibleSampleCount)
@@ -419,63 +478,239 @@ export class GameScene extends Phaser.Scene {
     g.lineStyle(2, COL_PLANET_RIM, 1)
     g.strokeCircle(cx, cy, R)
 
-    // Surface terrain bumps
-    const bumpCount = 48
-    for (let i = 0; i < bumpCount; i++) {
-      const angle = (i / bumpCount) * Math.PI * 2
-      const bumpH = 3 + Math.sin(i * 7.3 + 1.2) * 2
-      const bumpW = 4 + Math.sin(i * 3.1) * 2
-      const rad = radialUnit({ x: Math.cos(angle), y: Math.sin(angle) }, { x: 0, y: 0 })
-      const baseX = cx + Math.cos(angle) * R
-      const baseY = cy + Math.sin(angle) * R
-      const tipX = baseX + rad.x * bumpH
-      const tipY = baseY + rad.y * bumpH
-      g.lineStyle(bumpW, COL_PLANET_RIM, 0.7)
-      g.beginPath()
-      g.moveTo(baseX, baseY)
-      g.lineTo(tipX, tipY)
-      g.strokePath()
+    // Trees and mountains around the rim
+    const featureCount = 52
+    for (let i = 0; i < featureCount; i++) {
+      const angle = (i / featureCount) * Math.PI * 2
+      const height = 5 + Math.sin(i * 7.3 + 1.2) * 3 + Math.sin(i * 2.9) * 2
+      const halfBase = 2 + Math.sin(i * 3.1 + 0.7) * 1.2
+      const isMountain = height > 8
+
+      const rad = { x: Math.cos(angle), y: Math.sin(angle) }
+      const tan = { x: -Math.sin(angle), y: Math.cos(angle) }
+
+      const baseX = cx + rad.x * R
+      const baseY = cy + rad.y * R
+      const tipX  = baseX + rad.x * height
+      const tipY  = baseY + rad.y * height
+      const leftX  = baseX + tan.x * halfBase
+      const leftY  = baseY + tan.y * halfBase
+      const rightX = baseX - tan.x * halfBase
+      const rightY = baseY - tan.y * halfBase
+
+      if (isMountain) {
+        // Mountain body — dark grey
+        g.fillStyle(0x6a6a72)
+        g.beginPath()
+        g.moveTo(tipX, tipY)
+        g.lineTo(leftX, leftY)
+        g.lineTo(rightX, rightY)
+        g.closePath()
+        g.fillPath()
+        // Snow cap on top third
+        const snowX = baseX + rad.x * height * 0.65
+        const snowY = baseY + rad.y * height * 0.65
+        const snowHalfBase = halfBase * 0.45
+        g.fillStyle(0xeef4ff, 0.9)
+        g.beginPath()
+        g.moveTo(tipX, tipY)
+        g.lineTo(snowX + tan.x * snowHalfBase, snowY + tan.y * snowHalfBase)
+        g.lineTo(snowX - tan.x * snowHalfBase, snowY - tan.y * snowHalfBase)
+        g.closePath()
+        g.fillPath()
+      } else {
+        // Tree — dark green triangle, slightly narrower
+        g.fillStyle(0x1a4a0a)
+        g.beginPath()
+        g.moveTo(tipX, tipY)
+        g.lineTo(leftX, leftY)
+        g.lineTo(rightX, rightY)
+        g.closePath()
+        g.fillPath()
+        // Lighter highlight on one side
+        g.fillStyle(0x2d7a16, 0.5)
+        g.beginPath()
+        g.moveTo(tipX, tipY)
+        g.lineTo(baseX, baseY)
+        g.lineTo(rightX, rightY)
+        g.closePath()
+        g.fillPath()
+      }
     }
   }
 
   private renderHazards(g: Phaser.GameObjects.Graphics): void {
     for (const h of this.hazards) {
-      const angle = h.angle
-      const radial = { x: Math.cos(angle), y: Math.sin(angle) }
-      const tangent = tangentUnit(radial, true)
+      const rad = { x: Math.cos(h.angle), y: Math.sin(h.angle) }
+      const tan = tangentUnit(rad, true)
+      const sx = CENTRE.x + rad.x * PLANET_RADIUS
+      const sy = CENTRE.y + rad.y * PLANET_RADIUS
 
-      // Draw spike: trapezoid from surface to tip
-      const tipAlt = h.height
-      const halfBaseW = h.width * 0.5
-      const halfTipW = h.width * 0.15
+      if (h.width > 40) {
+        // ── Dormant volcano ──────────────────────────────────────────────
+        const hb = h.width * 0.5
+        const ht = h.width * 0.18
+        const topX = sx + rad.x * h.height
+        const topY = sy + rad.y * h.height
+        const craterR = h.width * 0.14
 
-      const surfX = CENTRE.x + radial.x * PLANET_RADIUS
-      const surfY = CENTRE.y + radial.y * PLANET_RADIUS
+        // Active: red-hot glow behind cone
+        if (h.volcanoState === 'active') {
+          g.fillStyle(0xff2200, 0.18)
+          g.fillCircle(topX, topY, hb * 1.1)
+        }
 
-      const b1x = surfX + tangent.x * halfBaseW
-      const b1y = surfY + tangent.y * halfBaseW
-      const b2x = surfX - tangent.x * halfBaseW
-      const b2y = surfY - tangent.y * halfBaseW
-      const t1x = surfX + radial.x * tipAlt + tangent.x * halfTipW
-      const t1y = surfY + radial.y * tipAlt + tangent.y * halfTipW
-      const t2x = surfX + radial.x * tipAlt - tangent.x * halfTipW
-      const t2y = surfY + radial.y * tipAlt - tangent.y * halfTipW
+        // Cone body — active ones are darker/redder
+        const coneCol = h.volcanoState === 'active' ? 0x2e1a12 : 0x3a3028
+        g.fillStyle(coneCol)
+        g.beginPath()
+        g.moveTo(sx  - tan.x * hb,        sy  - tan.y * hb)
+        g.lineTo(topX - tan.x * ht,       topY - tan.y * ht)
+        g.lineTo(topX + tan.x * ht,       topY + tan.y * ht)
+        g.lineTo(sx  + tan.x * hb,        sy  + tan.y * hb)
+        g.closePath()
+        g.fillPath()
 
-      g.fillStyle(COL_HAZARD)
+        // Lava streaks down the flanks for active/simmering
+        if (h.volcanoState !== 'dormant') {
+          const streaks = h.volcanoState === 'active' ? 3 : 1
+          for (let s = 0; s < streaks; s++) {
+            const t = 0.2 + s * 0.3
+            const lx1 = topX + tan.x * ht * (t - 0.1)
+            const ly1 = topY + tan.y * ht * (t - 0.1)
+            const lx2 = sx   + tan.x * hb * (t + 0.15)
+            const ly2 = sy   + tan.y * hb * (t + 0.15)
+            const alpha = h.volcanoState === 'active' ? 0.7 : 0.4
+            g.lineStyle(2, 0xff4400, alpha)
+            g.beginPath()
+            g.moveTo(lx1, ly1)
+            g.lineTo(lx2, ly2)
+            g.strokePath()
+          }
+        }
+
+        // Lit flank
+        g.fillStyle(0x524438, 0.6)
+        g.beginPath()
+        g.moveTo(sx,                       sy)
+        g.lineTo(sx  + tan.x * hb,        sy  + tan.y * hb)
+        g.lineTo(topX + tan.x * ht,       topY + tan.y * ht)
+        g.lineTo(topX,                     topY)
+        g.closePath()
+        g.fillPath()
+
+        // Crater rim
+        g.fillStyle(0x5c4a3c)
+        g.fillCircle(topX, topY, craterR + 2)
+        // Crater hole
+        g.fillStyle(0x140c08)
+        g.fillCircle(topX, topY, craterR)
+
+        if (h.volcanoState === 'dormant') {
+          g.fillStyle(0x3a0a00, 0.4)
+          g.fillCircle(topX, topY, craterR * 0.5)
+        } else if (h.volcanoState === 'simmering') {
+          g.fillStyle(0xcc3300, 0.7)
+          g.fillCircle(topX, topY, craterR * 0.75)
+          g.fillStyle(0xff6600, 0.5)
+          g.fillCircle(topX, topY, craterR * 0.4)
+          // Small smoke puff
+          g.fillStyle(0x554444, 0.3)
+          g.fillCircle(topX + rad.x * craterR * 2, topY + rad.y * craterR * 2, craterR * 0.8)
+        } else {
+          // Active — bright lava
+          g.fillStyle(0xff4400, 0.4)
+          g.fillCircle(topX, topY, craterR + 5)
+          g.fillStyle(0xff6600, 0.9)
+          g.fillCircle(topX, topY, craterR * 0.85)
+          g.fillStyle(0xffcc00, 0.8)
+          g.fillCircle(topX, topY, craterR * 0.45)
+          // Rising plume of smoke/fire above crater
+          const plumeSteps = 5
+          for (let p = 1; p <= plumeSteps; p++) {
+            const t = p / plumeSteps
+            const pr = h.height * 0.6 * t
+            const px = topX + rad.x * pr
+            const py = topY + rad.y * pr
+            const pSize = craterR * (1.2 + t * 1.4)
+            // Smoke
+            g.fillStyle(0x332222, (1 - t) * 0.45)
+            g.fillCircle(px, py, pSize)
+            // Fire core at base of plume
+            if (t < 0.5) {
+              g.fillStyle(0xff5500, (0.5 - t) * 0.8)
+              g.fillCircle(px, py, pSize * 0.5)
+            }
+          }
+        }
+
+      } else {
+        // ── Dead giant tree ──────────────────────────────────────────────
+        const tw = h.width * 0.18
+        const th = h.height
+        const topX = sx + rad.x * th
+        const topY = sy + rad.y * th
+
+        // Trunk
+        g.fillStyle(0x2e1f0e)
+        g.beginPath()
+        g.moveTo(sx   - tan.x * tw,         sy   - tan.y * tw)
+        g.lineTo(topX - tan.x * tw * 0.4,   topY - tan.y * tw * 0.4)
+        g.lineTo(topX + tan.x * tw * 0.4,   topY + tan.y * tw * 0.4)
+        g.lineTo(sx   + tan.x * tw,         sy   + tan.y * tw)
+        g.closePath()
+        g.fillPath()
+
+        // Bare branches
+        const branches = [
+          { frac: 0.78, side:  1, len: th * 0.32, lift: 0.35 },
+          { frac: 0.60, side: -1, len: th * 0.26, lift: 0.40 },
+          { frac: 0.88, side: -1, len: th * 0.18, lift: 0.28 },
+          { frac: 0.50, side:  1, len: th * 0.20, lift: 0.45 },
+        ]
+        for (const b of branches) {
+          const bx = sx + rad.x * th * b.frac
+          const by = sy + rad.y * th * b.frac
+          const dx = tan.x * b.side * Math.cos(b.lift) + rad.x * Math.sin(b.lift)
+          const dy = tan.y * b.side * Math.cos(b.lift) + rad.y * Math.sin(b.lift)
+          g.lineStyle(Math.max(1, tw * 0.7), 0x2e1f0e, 1)
+          g.beginPath()
+          g.moveTo(bx, by)
+          g.lineTo(bx + dx * b.len, by + dy * b.len)
+          g.strokePath()
+        }
+      }
+    }
+  }
+
+  private renderLavaBlobs(g: Phaser.GameObjects.Graphics, nowMs: number): void {
+    for (const b of this.lavaBlobs) {
+      const age = nowMs - b.spawnMs
+      const life = 1 - age / LAVA_BLOB_LIFE_MS
+
+      // Velocity trail
+      const speed = Math.sqrt(b.vx * b.vx + b.vy * b.vy) || 1
+      const trailLen = Math.min(speed * 0.04, 18)
+      const tx = b.x - (b.vx / speed) * trailLen
+      const ty = b.y - (b.vy / speed) * trailLen
+      g.lineStyle(b.radius * 1.2, 0xff4400, life * 0.5)
       g.beginPath()
-      g.moveTo(b1x, b1y)
-      g.lineTo(t1x, t1y)
-      g.lineTo(t2x, t2y)
-      g.lineTo(b2x, b2y)
-      g.closePath()
-      g.fillPath()
-
-      // Tip highlight
-      g.lineStyle(1, COL_HAZARD_TIP, 0.8)
-      g.beginPath()
-      g.moveTo(t1x, t1y)
-      g.lineTo(t2x, t2y)
+      g.moveTo(b.x, b.y)
+      g.lineTo(tx, ty)
       g.strokePath()
+
+      // Outer glow
+      g.fillStyle(0xff4400, life * 0.3)
+      g.fillCircle(b.x, b.y, b.radius + 4)
+      // Core — cools from orange to dark red
+      const col = life > 0.5 ? 0xff6600 : 0xcc2200
+      g.fillStyle(col, Math.min(1, life * 0.9 + 0.1))
+      g.fillCircle(b.x, b.y, b.radius)
+      // Hot bright centre when freshly launched
+      if (life > 0.6) {
+        g.fillStyle(0xffdd44, (life - 0.6) * 2.5)
+        g.fillCircle(b.x, b.y, b.radius * 0.45)
+      }
     }
   }
 

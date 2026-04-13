@@ -33,3 +33,14 @@ export interface HazardItem {
   width: number     // world units
   height: number    // world units (radial extent)
 }
+
+export type VolcanoState = 'dormant' | 'simmering' | 'active'
+
+export interface LavaBlob {
+  x: number
+  y: number
+  vx: number
+  vy: number
+  radius: number
+  spawnMs: number
+}
