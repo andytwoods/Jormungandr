@@ -10,9 +10,23 @@ import {
   PLANET_RADIUS, PLAYABLE_ALT_MAX, THIN_ATMOSPHERE_THRUST_FACTOR
 } from '../config'
 
+export interface MovementStats {
+  maxSpeed: number
+  minTangentialSpeed: number
+  playableAltMax: number
+}
+
 const CENTRE = { x: 0, y: 0 }
 
-export function updateMovement(head: SerpentHead, input: InputState, dtSec: number): void {
+export function baseMovementStats(): MovementStats {
+  return {
+    maxSpeed: MAX_SPEED,
+    minTangentialSpeed: MIN_TANGENTIAL_SPEED,
+    playableAltMax: PLAYABLE_ALT_MAX,
+  }
+}
+
+export function updateMovement(head: SerpentHead, input: InputState, dtSec: number, stats: MovementStats): void {
   const { upHeld } = input
   const pos = head.position
   const vel = head.velocity
@@ -26,7 +40,7 @@ export function updateMovement(head: SerpentHead, input: InputState, dtSec: numb
 
   // --- Thrust ---
   const alt = altitude(pos, CENTRE, PLANET_RADIUS)
-  const thrustFactor = alt > PLAYABLE_ALT_MAX ? THIN_ATMOSPHERE_THRUST_FACTOR : 1.0
+  const thrustFactor = alt > stats.playableAltMax ? THIN_ATMOSPHERE_THRUST_FACTOR : 1.0
 
   if (upHeld) {
     // Space: pure radial outward
@@ -40,24 +54,22 @@ export function updateMovement(head: SerpentHead, input: InputState, dtSec: numb
   vel.y *= dampFactor
 
   // --- Minimum tangential speed floor ---
-  // Project velocity onto tangent plane; nudge if too slow
   const cwTang = tangentUnit(radial, true)
   const tangentialSpeed = dot(vel, cwTang)
   const absSpeed = Math.abs(tangentialSpeed)
-  if (absSpeed < MIN_TANGENTIAL_SPEED) {
-    // Nudge in whichever tangential direction the serpent is already moving
+  if (absSpeed < stats.minTangentialSpeed) {
     const sign = tangentialSpeed >= 0 ? 1 : -1
-    const deficit = (MIN_TANGENTIAL_SPEED - absSpeed)
+    const deficit = (stats.minTangentialSpeed - absSpeed)
     vel.x += cwTang.x * sign * deficit
     vel.y += cwTang.y * sign * deficit
   }
 
   // --- Speed cap ---
   const spd = length(vel)
-  if (spd > MAX_SPEED) {
+  if (spd > stats.maxSpeed) {
     const n = normalize(vel)
-    vel.x = n.x * MAX_SPEED
-    vel.y = n.y * MAX_SPEED
+    vel.x = n.x * stats.maxSpeed
+    vel.y = n.y * stats.maxSpeed
   }
 
   // --- Integrate ---

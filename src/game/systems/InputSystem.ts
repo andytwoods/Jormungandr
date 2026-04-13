@@ -2,7 +2,7 @@ import Phaser from 'phaser'
 import type { InputState } from '../types'
 
 export class InputSystem {
-  private upHeld = false
+  private touchHeld = false
   private restartPressed = false
 
   private keys!: {
@@ -18,15 +18,18 @@ export class InputSystem {
       r:     kb.addKey(Phaser.Input.Keyboard.KeyCodes.R),
     }
 
-    scene.input.on('pointerdown', () => { this.upHeld = true })
-    scene.input.on('pointerup',   () => { this.upHeld = false })
-    scene.input.on('pointerupoutside', () => { this.upHeld = false })
+    scene.input.on('pointerdown',    () => { this.touchHeld = true })
+    scene.input.on('pointerup',      () => { this.touchHeld = false })
+    scene.input.on('pointerupoutside', () => { this.touchHeld = false })
   }
 
   update(): void {
-    this.upHeld = this.keys.space.isDown
     this.restartPressed = Phaser.Input.Keyboard.JustDown(this.keys.r) ||
                           Phaser.Input.Keyboard.JustDown(this.keys.space)
+  }
+
+  get upHeld(): boolean {
+    return this.touchHeld || this.keys.space.isDown
   }
 
   getState(): InputState {

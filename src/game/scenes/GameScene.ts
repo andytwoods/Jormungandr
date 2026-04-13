@@ -3,7 +3,7 @@ import { SerpentHead } from '../entities/SerpentHead'
 import { SerpentBody } from '../entities/SerpentBody'
 import { buildHazardRuntime, type HazardRuntime } from '../entities/Hazard'
 import { InputSystem } from '../systems/InputSystem'
-import { updateMovement } from '../systems/MovementSystem'
+import { updateMovement, baseMovementStats, type MovementStats } from '../systems/MovementSystem'
 import { GrowthSystem } from '../systems/GrowthSystem'
 import { checkDeath, checkFoodCollection } from '../systems/CollisionSystem'
 import { spawnFood, generateHazards, addHazard } from '../systems/SpawnSystem'
@@ -18,7 +18,7 @@ import {
   CAMERA_BASE_ZOOM, CAMERA_MAX_ZOOM_OUT, CAMERA_SMOOTHING,
   INITIAL_BODY_SAMPLES, BODY_WIDTH_HEAD, BODY_WIDTH_TAIL,
   HEAD_COLLISION_RADIUS, FOOD_RADIUS, HAZARD_ADD_INTERVAL, HAZARD_SOFT_MAX,
-  PLAYABLE_ALT_MAX
+  PLAYABLE_ALT_MAX, MAX_SPEED, MIN_TANGENTIAL_SPEED
 } from '../config'
 
 const CENTRE = { x: 0, y: 0 }
@@ -52,6 +52,7 @@ export class GameScene extends Phaser.Scene {
   private score = 0
   private bestScore = 0
   private foodsSinceLastHazard = 0
+  private movementStats: MovementStats = baseMovementStats()
 
   private gfx!: Phaser.GameObjects.Graphics
   private scoreText!: Phaser.GameObjects.Text
@@ -153,6 +154,20 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Re-compute movement + body stats from current score */
+  private recomputeStats(): void {
+    const f = this.score
+    this.movementStats = {
+      maxSpeed:           MAX_SPEED            + f * 30,   // +30 speed per food
+      minTangentialSpeed: MIN_TANGENTIAL_SPEED + f * 12,   // +12 orbital floor per food
+      playableAltMax:     PLAYABLE_ALT_MAX     + f * 10,   // +10 altitude ceiling per food
+    }
+  }
+
+  /** Dynamic body widths based on score */
+  private bodyHeadWidth(): number { return BODY_WIDTH_HEAD + this.score * 0.8 }
+  private bodyTailWidth(): number { return BODY_WIDTH_TAIL + this.score * 0.4 }
+
   update(time: number, delta: number): void {
     const dtSec = delta / 1000
     const nowMs = time
@@ -173,7 +188,7 @@ export class GameScene extends Phaser.Scene {
     const inputState = this.inputSys.getState()
 
     // Physics
-    updateMovement(this.head, inputState, dtSec)
+    updateMovement(this.head, inputState, dtSec, this.movementStats)
 
     // Push head position into body buffer
     this.body.push(this.head.position.x, this.head.position.y)
@@ -198,6 +213,7 @@ export class GameScene extends Phaser.Scene {
       this.score++
       this.foodsSinceLastHazard++
       this.growth.onFoodEaten(nowMs)
+      this.recomputeStats()
       this.scoreText.setText(`score: ${this.score}`)
 
       // Difficulty ramp: add hazard every N foods
@@ -240,6 +256,7 @@ export class GameScene extends Phaser.Scene {
     this.gameState = 'PLAYING'
     this.score = 0
     this.foodsSinceLastHazard = 0
+    this.movementStats = baseMovementStats()
     this.scoreText.setText('score: 0')
     this.deathPanel.setVisible(false)
     this.growth.reset()
@@ -299,7 +316,7 @@ export class GameScene extends Phaser.Scene {
     this.renderFood(g, nowMs)
 
     const samples = this.body.getSamples(this.body.visibleSampleCount)
-    this.renderBody(g, samples, nowMs)
+    this.renderBody(g, samples, nowMs, this.bodyHeadWidth(), this.bodyTailWidth())
     this.renderHead(g)
   }
 
@@ -393,7 +410,7 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private renderBody(g: Phaser.GameObjects.Graphics, samples: readonly BodySample[], nowMs: number): void {
+  private renderBody(g: Phaser.GameObjects.Graphics, samples: readonly BodySample[], nowMs: number, headWidth: number, tailWidth: number): void {
     if (samples.length < 2) return
     const total = samples.length
 
@@ -403,7 +420,7 @@ export class GameScene extends Phaser.Scene {
 
     for (let i = 0; i < total; i++) {
       const t = i / (total - 1)
-      const w = lerp(BODY_WIDTH_HEAD / 2, BODY_WIDTH_TAIL / 2, t)
+      const w = lerp(headWidth / 2, tailWidth / 2, t)
       let dx: number, dy: number
       if (i < total - 1) {
         dx = samples[i + 1].x - samples[i].x
@@ -450,7 +467,7 @@ export class GameScene extends Phaser.Scene {
 
     // Tail round cap
     g.fillStyle(COL_BODY_DARK)
-    g.fillCircle(samples[total - 1].x, samples[total - 1].y, BODY_WIDTH_TAIL / 2)
+    g.fillCircle(samples[total - 1].x, samples[total - 1].y, tailWidth / 2)
 
     // Edge outlines
     g.lineStyle(1, 0x1a5008, 0.6)
@@ -470,7 +487,7 @@ export class GameScene extends Phaser.Scene {
       if (sampleIdx >= 0 && sampleIdx < samples.length) {
         const s = samples[sampleIdx]
         const t = sampleIdx / Math.max(1, total - 1)
-        const r = lerp(BODY_WIDTH_HEAD / 2, BODY_WIDTH_TAIL / 2, t) + 3
+        const r = lerp(headWidth / 2, tailWidth / 2, t) + 3
         g.fillStyle(COL_PULSE, 0.7)
         g.fillCircle(s.x, s.y, r)
       }
@@ -483,7 +500,7 @@ export class GameScene extends Phaser.Scene {
     const speed = Math.sqrt(this.head.velocity.x ** 2 + this.head.velocity.y ** 2)
     const dir = speed > 1 ? normalize(this.head.velocity) : { x: 1, y: 0 }
     const perp = { x: -dir.y, y: dir.x }
-    const R = HEAD_COLLISION_RADIUS + 3
+    const R = this.bodyHeadWidth() / 2 + 2
 
     // Pointed wedge: tip → left shoulder → left back → right back → right shoulder
     const tipX  = hx + dir.x * R * 1.3
