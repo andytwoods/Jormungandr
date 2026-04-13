@@ -3,7 +3,7 @@ import type { HazardRuntime } from '../entities/Hazard'
 import { distance, altitude, circleOverlapsCapsule } from '../utils/math'
 import {
   PLANET_RADIUS, HEAD_COLLISION_RADIUS, SAFE_NECK_SAMPLES,
-  FOOD_RADIUS, ATMOSPHERE_HARD_CAP
+  FOOD_RADIUS
 } from '../config'
 
 const CENTRE = { x: 0, y: 0 }
@@ -25,10 +25,7 @@ export function checkDeath(
   const alt = altitude(head, CENTRE, PLANET_RADIUS)
   if (alt <= 0) return 'surface'
 
-  // 2. Atmosphere hard cap (safety failsafe)
-  if (alt > ATMOSPHERE_HARD_CAP) return 'ceiling'
-
-  // 3. Hazards (bounding circle check)
+  // 2. Hazards (bounding circle check)
   for (const h of hazards) {
     const hCentre = { x: h.worldX, y: h.worldY }
     if (distance(head, hCentre) < HEAD_COLLISION_RADIUS + h.collisionRadius) return 'hazard'

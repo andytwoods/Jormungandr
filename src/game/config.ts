@@ -40,6 +40,7 @@ export const SPAWN_SAFE_ARC_DEG = 30     // degrees around spawn angle kept clea
 // Food
 export const INITIAL_FOOD_COUNT = 3
 export const FOOD_RADIUS = 8             // collision radius
+export const FOOD_LIFETIME_MS = 30_000    // food despawns and relocates after this
 export const FOOD_SPAWN_EXCLUSION_DEG = 25  // angular buffer ahead of head – no spawns here
 export const FOOD_MAX_ALTITUDE = 180     // prefer below this; hard rule
 export const SPAWN_SEGMENTS = 36         // angular segments for precomputed spawn

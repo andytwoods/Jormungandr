@@ -1,4 +1,5 @@
 import type { FoodItem, HazardItem, BodySample } from '../types'
+import type { HazardRuntime } from '../entities/Hazard'
 import { createFood } from '../entities/Food'
 import { orbitPoint, angleFromCentre, angleDiffDeg } from '../utils/math'
 import {
@@ -29,7 +30,9 @@ export function spawnFood(
   existingFood: FoodItem[],
   _headX: number,
   _headY: number,
-  headAngle: number
+  headAngle: number,
+  hazards: HazardRuntime[],
+  nowMs: number
 ): FoodItem | null {
   // Mark occupied segments from body
   const occupied = new Set<number>()
@@ -50,6 +53,15 @@ export function spawnFood(
     occupied.add(angleToBin(angle))
   }
 
+  // Mark segments occupied by hazards (using their angular half-width)
+  for (const h of hazards) {
+    const halfWidthRad = (h.width / 2) / PLANET_RADIUS
+    const steps = Math.ceil(halfWidthRad / SEG_SIZE_RAD) + 1
+    for (let s = -steps; s <= steps; s++) {
+      occupied.add(angleToBin(h.angle + s * SEG_SIZE_RAD))
+    }
+  }
+
   // Collect free segments
   const freeSegments: number[] = []
   for (let i = 0; i < SPAWN_SEGMENTS; i++) {
@@ -64,7 +76,7 @@ export function spawnFood(
   const alt = randomInRange(PLAYABLE_ALT_MIN, FOOD_MAX_ALTITUDE)
   const pos = orbitPoint(CENTRE, PLANET_RADIUS, segAngle, alt)
 
-  return createFood(pos.x, pos.y)
+  return createFood(pos.x, pos.y, nowMs)
 }
 
 /**

@@ -23,6 +23,7 @@ export interface FoodItem {
   x: number
   y: number
   id: number
+  spawnTime: number  // ms timestamp — food expires after FOOD_LIFETIME_MS
 }
 
 export interface HazardItem {
