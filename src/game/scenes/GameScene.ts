@@ -17,8 +17,8 @@ import {
   PLANET_RADIUS, INITIAL_FOOD_COUNT, INITIAL_HAZARD_COUNT,
   CAMERA_BASE_ZOOM, CAMERA_MAX_ZOOM_OUT, CAMERA_SMOOTHING,
   INITIAL_BODY_SAMPLES, BODY_WIDTH_HEAD, BODY_WIDTH_TAIL,
-  HEAD_COLLISION_RADIUS, FOOD_RADIUS, HAZARD_ADD_INTERVAL, HAZARD_SOFT_MAX,
-  PLAYABLE_ALT_MAX, MAX_SPEED, MIN_TANGENTIAL_SPEED
+  FOOD_RADIUS, HAZARD_ADD_INTERVAL, HAZARD_SOFT_MAX,
+  PLAYABLE_ALT_MAX, MAX_SPEED, MIN_TANGENTIAL_SPEED, FOOD_LIFETIME_MS
 } from '../config'
 
 const CENTRE = { x: 0, y: 0 }
@@ -165,8 +165,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** Dynamic body widths based on score */
-  private bodyHeadWidth(): number { return BODY_WIDTH_HEAD + this.score * 0.8 }
-  private bodyTailWidth(): number { return BODY_WIDTH_TAIL + this.score * 0.4 }
+  private bodyHeadWidth(): number { return BODY_WIDTH_HEAD + this.score * 2.5 }
+  private bodyTailWidth(): number { return BODY_WIDTH_TAIL + this.score * 1.2 }
 
   update(time: number, delta: number): void {
     const dtSec = delta / 1000
@@ -206,6 +206,16 @@ export class GameScene extends Phaser.Scene {
       return
     }
 
+    // Expire old food and respawn elsewhere
+    const headAngle = angleFromCentre(this.head.position, CENTRE)
+    for (let i = this.foods.length - 1; i >= 0; i--) {
+      if (nowMs - this.foods[i].spawnTime > FOOD_LIFETIME_MS) {
+        this.foods.splice(i, 1)
+        const replacement = spawnFood(samples, this.foods, this.head.position.x, this.head.position.y, headAngle, this.hazards, nowMs)
+        if (replacement) this.foods.push(replacement)
+      }
+    }
+
     // Food collection
     const eaten = checkFoodCollection(this.head.position.x, this.head.position.y, this.foods)
     if (eaten >= 0) {
@@ -226,8 +236,7 @@ export class GameScene extends Phaser.Scene {
       }
 
       // Spawn replacement food
-      const headAngle = angleFromCentre(this.head.position, CENTRE)
-      const newFood = spawnFood(samples, this.foods, this.head.position.x, this.head.position.y, headAngle)
+      const newFood = spawnFood(samples, this.foods, this.head.position.x, this.head.position.y, headAngle, this.hazards, nowMs)
       if (newFood) this.foods.push(newFood)
     }
 
@@ -292,11 +301,11 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private spawnFoodBatch(count: number): void {
+  private spawnFoodBatch(count: number, nowMs = 0): void {
     const samples = this.body.getSamples(this.body.visibleSampleCount)
     const headAngle = angleFromCentre(this.head.position, CENTRE)
     for (let i = 0; i < count; i++) {
-      const f = spawnFood(samples, this.foods, this.head.position.x, this.head.position.y, headAngle)
+      const f = spawnFood(samples, this.foods, this.head.position.x, this.head.position.y, headAngle, this.hazards, nowMs)
       if (f) this.foods.push(f)
     }
   }
