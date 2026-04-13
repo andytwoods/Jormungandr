@@ -25,7 +25,8 @@ export class InputSystem {
 
   update(): void {
     this.upHeld = this.keys.space.isDown
-    this.restartPressed = Phaser.Input.Keyboard.JustDown(this.keys.r)
+    this.restartPressed = Phaser.Input.Keyboard.JustDown(this.keys.r) ||
+                          Phaser.Input.Keyboard.JustDown(this.keys.space)
   }
 
   getState(): InputState {

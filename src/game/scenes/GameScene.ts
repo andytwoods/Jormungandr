@@ -135,7 +135,7 @@ export class GameScene extends Phaser.Scene {
     this.deathBestText = this.add.text(0, 4, '', {
       fontSize: `${fs}px`, color: '#ffffd0', fontFamily: 'monospace', align: 'center'
     }).setOrigin(0.5)
-    const hint = this.add.text(0, fs + 16, 'tap or press R to restart', {
+    const hint = this.add.text(0, fs + 16, 'tap or press space to restart', {
       fontSize: `${Math.round(fs * 0.8)}px`, color: '#aaaaaa', fontFamily: 'monospace', align: 'center'
     }).setOrigin(0.5)
 
@@ -395,21 +395,75 @@ export class GameScene extends Phaser.Scene {
 
   private renderBody(g: Phaser.GameObjects.Graphics, samples: readonly BodySample[], nowMs: number): void {
     if (samples.length < 2) return
-
     const total = samples.length
 
-    // Draw body segments back-to-front (tail first so head overlaps)
-    for (let i = total - 1; i >= 1; i--) {
-      const t = i / (total - 1)         // 0 = closest to head, 1 = tail
-      const radius = lerp(BODY_WIDTH_HEAD / 2, BODY_WIDTH_TAIL / 2, t)
-      const col = t > 0.5 ? COL_BODY_DARK : COL_BODY
+    // Pre-compute left/right edge points for a smooth tapered ribbon
+    const lx: number[] = [], ly: number[] = []
+    const rx: number[] = [], ry: number[] = []
 
-      // Segment circle at each sample point
-      g.fillStyle(col)
-      g.fillCircle(samples[i].x, samples[i].y, radius)
+    for (let i = 0; i < total; i++) {
+      const t = i / (total - 1)
+      const w = lerp(BODY_WIDTH_HEAD / 2, BODY_WIDTH_TAIL / 2, t)
+      let dx: number, dy: number
+      if (i < total - 1) {
+        dx = samples[i + 1].x - samples[i].x
+        dy = samples[i + 1].y - samples[i].y
+      } else {
+        dx = samples[i].x - samples[i - 1].x
+        dy = samples[i].y - samples[i - 1].y
+      }
+      const len = Math.sqrt(dx * dx + dy * dy) || 1
+      const nx = -dy / len
+      const ny =  dx / len
+      lx.push(samples[i].x + nx * w)
+      ly.push(samples[i].y + ny * w)
+      rx.push(samples[i].x - nx * w)
+      ry.push(samples[i].y - ny * w)
     }
 
-    // Draw growth pulses
+    // Filled ribbon — alternating scale bands every 3 samples
+    for (let i = 0; i < total - 1; i++) {
+      const t = (i + 0.5) / (total - 1)
+      const light = Math.floor(i / 3) % 2 === 0
+      const col = t < 0.5
+        ? (light ? 0x4aaa1a : COL_BODY)
+        : (light ? 0x3a7a0a : COL_BODY_DARK)
+      g.fillStyle(col)
+      g.beginPath()
+      g.moveTo(lx[i],     ly[i])
+      g.lineTo(rx[i],     ry[i])
+      g.lineTo(rx[i + 1], ry[i + 1])
+      g.lineTo(lx[i + 1], ly[i + 1])
+      g.closePath()
+      g.fillPath()
+    }
+
+    // Scale divider lines
+    for (let i = 3; i < total - 1; i += 3) {
+      const alpha = lerp(0.45, 0.08, i / (total - 1))
+      g.lineStyle(1, 0x1a5008, alpha)
+      g.beginPath()
+      g.moveTo(lx[i], ly[i])
+      g.lineTo(rx[i], ry[i])
+      g.strokePath()
+    }
+
+    // Tail round cap
+    g.fillStyle(COL_BODY_DARK)
+    g.fillCircle(samples[total - 1].x, samples[total - 1].y, BODY_WIDTH_TAIL / 2)
+
+    // Edge outlines
+    g.lineStyle(1, 0x1a5008, 0.6)
+    g.beginPath()
+    g.moveTo(lx[0], ly[0])
+    for (let i = 1; i < total; i++) g.lineTo(lx[i], ly[i])
+    g.strokePath()
+    g.beginPath()
+    g.moveTo(rx[0], ry[0])
+    for (let i = 1; i < total; i++) g.lineTo(rx[i], ry[i])
+    g.strokePath()
+
+    // Growth pulses
     for (const pulse of this.growth.pulses) {
       const progress = this.growth.getPulseProgress(pulse, nowMs)
       const sampleIdx = Math.min(Math.floor(progress * (total - 1)), total - 1)
@@ -426,22 +480,49 @@ export class GameScene extends Phaser.Scene {
   private renderHead(g: Phaser.GameObjects.Graphics): void {
     const hx = this.head.position.x
     const hy = this.head.position.y
-
-    // Head circle
-    g.fillStyle(COL_HEAD)
-    g.fillCircle(hx, hy, HEAD_COLLISION_RADIUS + 3)
-
-    // Eye: offset toward direction of travel
     const speed = Math.sqrt(this.head.velocity.x ** 2 + this.head.velocity.y ** 2)
-    if (speed > 1) {
-      const dir = normalize(this.head.velocity)
-      const eyeX = hx + dir.x * 5
-      const eyeY = hy + dir.y * 5
+    const dir = speed > 1 ? normalize(this.head.velocity) : { x: 1, y: 0 }
+    const perp = { x: -dir.y, y: dir.x }
+    const R = HEAD_COLLISION_RADIUS + 3
+
+    // Pointed wedge: tip → left shoulder → left back → right back → right shoulder
+    const tipX  = hx + dir.x * R * 1.3
+    const tipY  = hy + dir.y * R * 1.3
+    const midX  = hx - dir.x * R * 0.2
+    const midY  = hy - dir.y * R * 0.2
+    const backX = hx - dir.x * R * 0.9
+    const backY = hy - dir.y * R * 0.9
+
+    g.fillStyle(COL_HEAD)
+    g.beginPath()
+    g.moveTo(tipX, tipY)
+    g.lineTo(midX  + perp.x * R,       midY  + perp.y * R)
+    g.lineTo(backX + perp.x * R * 0.5, backY + perp.y * R * 0.5)
+    g.lineTo(backX - perp.x * R * 0.5, backY - perp.y * R * 0.5)
+    g.lineTo(midX  - perp.x * R,       midY  - perp.y * R)
+    g.closePath()
+    g.fillPath()
+
+    g.lineStyle(1.5, 0x4aaa00, 1)
+    g.beginPath()
+    g.moveTo(tipX, tipY)
+    g.lineTo(midX  + perp.x * R,       midY  + perp.y * R)
+    g.lineTo(backX + perp.x * R * 0.5, backY + perp.y * R * 0.5)
+    g.lineTo(backX - perp.x * R * 0.5, backY - perp.y * R * 0.5)
+    g.lineTo(midX  - perp.x * R,       midY  - perp.y * R)
+    g.closePath()
+    g.strokePath()
+
+    // Two eyes — forward and to each side
+    const eyeX = hx + dir.x * R * 0.4
+    const eyeY = hy + dir.y * R * 0.4
+    for (const s of [1, -1]) {
+      const ex = eyeX + perp.x * R * 0.55 * s
+      const ey = eyeY + perp.y * R * 0.55 * s
       g.fillStyle(COL_EYE)
-      g.fillCircle(eyeX, eyeY, 3)
-      // Pupil highlight
+      g.fillCircle(ex, ey, 2.5)
       g.fillStyle(0xffffff)
-      g.fillCircle(eyeX - 1, eyeY - 1, 1)
+      g.fillCircle(ex - 0.5, ey - 0.5, 1)
     }
   }
 }
