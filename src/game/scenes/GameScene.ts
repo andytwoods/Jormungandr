@@ -25,9 +25,13 @@ const CENTRE = { x: 0, y: 0 }
 const SPAWN_ANGLE = Math.PI / 2  // bottom of planet
 
 // Colours
-const COL_SKY_LOW    = 0x0a0a1a
-const COL_PLANET     = 0x1a2a1a
-const COL_PLANET_RIM = 0x2a4a2a
+const COL_SKY_LOW      = 0x0a0a1a
+const COL_OCEAN_DEEP   = 0x0d3d6b
+const COL_OCEAN_SHALLOW = 0x1a6a9a
+const COL_LAND_DEEP    = 0x1a3d0a
+const COL_LAND         = 0x2d7a16
+const COL_POLAR_ICE    = 0xdcf0ff
+const COL_PLANET_RIM   = 0x2a4a2a
 const COL_BODY       = 0x3a8a1a
 const COL_BODY_DARK  = 0x2a5a0a
 const COL_HEAD       = 0x7fff00
@@ -337,25 +341,95 @@ export class GameScene extends Phaser.Scene {
   }
 
   private renderPlanet(g: Phaser.GameObjects.Graphics): void {
-    // Planet body
-    g.fillStyle(COL_PLANET)
-    g.fillCircle(CENTRE.x, CENTRE.y, PLANET_RADIUS)
+    const cx = CENTRE.x, cy = CENTRE.y, R = PLANET_RADIUS
 
-    // Rim highlight (slightly lighter ring)
-    g.lineStyle(3, COL_PLANET_RIM, 1)
-    g.strokeCircle(CENTRE.x, CENTRE.y, PLANET_RADIUS)
+    // Deep ocean base
+    g.fillStyle(COL_OCEAN_DEEP)
+    g.fillCircle(cx, cy, R)
 
-    // Subtle surface texture: small bumps around the rim
+    // Shallow water inner tint
+    g.fillStyle(COL_OCEAN_SHALLOW, 0.35)
+    g.fillCircle(cx, cy, R * 0.72)
+
+    // Helper: draw a closed surface patch (outer arc forward, inner arc back)
+    const drawPatch = (
+      a0: number, a1: number,
+      outerR: number, innerR: number,
+      outerAmp: number, innerAmp: number,
+      seed: number, steps: number
+    ) => {
+      const span = a1 - a0
+      g.beginPath()
+      // Outer edge (forward)
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps
+        const angle = a0 + t * span
+        const j = Math.sin(i * 5.3 + seed)        * outerAmp
+                + Math.sin(i * 13.1 + seed * 0.4) * outerAmp * 0.4
+                + Math.sin(i * 2.7  + seed * 1.7) * outerAmp * 0.5
+        const r = R * (outerR + j)
+        if (i === 0) g.moveTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r)
+        else         g.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r)
+      }
+      // Inner edge (backward)
+      for (let i = steps; i >= 0; i--) {
+        const t = i / steps
+        const angle = a0 + t * span
+        const j = Math.sin(i * 3.7 + seed * 1.3)  * innerAmp
+                + Math.sin(i * 9.1  + seed * 0.8)  * innerAmp * 0.5
+                + Math.sin(i * 17.3 + seed * 2.1)  * innerAmp * 0.3
+        const r = R * (innerR + j)
+        g.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r)
+      }
+      g.closePath()
+      g.fillPath()
+    }
+
+    // Three continents — uneven size and spacing, no pie-slice geometry
+    const landMasses = [
+      { a0: 0.15, a1: 1.4,  outer: 0.97, inner: 0.82, oAmp: 0.025, iAmp: 0.03 },
+      { a0: 2.0,  a1: 2.95, outer: 0.96, inner: 0.80, oAmp: 0.030, iAmp: 0.04 },
+      { a0: 3.8,  a1: 5.2,  outer: 0.97, inner: 0.83, oAmp: 0.020, iAmp: 0.03 },
+    ]
+
+    for (const land of landMasses) {
+      const seed = land.a0 * 7.3
+      g.fillStyle(COL_LAND_DEEP)
+      drawPatch(land.a0, land.a1, land.outer, land.inner + 0.05, land.oAmp, land.iAmp * 0.6, seed, 26)
+      g.fillStyle(COL_LAND)
+      drawPatch(land.a0 + 0.05, land.a1 - 0.05, land.outer - 0.01, land.inner, land.oAmp * 0.8, land.iAmp, seed + 1.1, 22)
+    }
+
+    // Polar caps — surface patches, not wedges
+    const poleCaps = [
+      { centre: -Math.PI / 2, halfSpan: 0.52, outer: 0.97, inner: 0.88 },
+      { centre:  Math.PI / 2 + 0.3, halfSpan: 0.28, outer: 0.97, inner: 0.90 },
+    ]
+    for (const cap of poleCaps) {
+      const seed = cap.centre * 3.1
+      g.fillStyle(COL_POLAR_ICE, 0.88)
+      drawPatch(cap.centre - cap.halfSpan, cap.centre + cap.halfSpan, cap.outer, cap.inner, 0.015, 0.025, seed, 18)
+    }
+
+    // Ocean specular shimmer
+    g.fillStyle(0x5aaadd, 0.10)
+    g.fillCircle(cx - R * 0.25, cy - R * 0.25, R * 0.55)
+
+    // Planet rim
+    g.lineStyle(2, COL_PLANET_RIM, 1)
+    g.strokeCircle(cx, cy, R)
+
+    // Surface terrain bumps
     const bumpCount = 48
     for (let i = 0; i < bumpCount; i++) {
       const angle = (i / bumpCount) * Math.PI * 2
       const bumpH = 3 + Math.sin(i * 7.3 + 1.2) * 2
       const bumpW = 4 + Math.sin(i * 3.1) * 2
-      const radial = radialUnit({ x: Math.cos(angle), y: Math.sin(angle) }, { x: 0, y: 0 })
-      const baseX = CENTRE.x + Math.cos(angle) * PLANET_RADIUS
-      const baseY = CENTRE.y + Math.sin(angle) * PLANET_RADIUS
-      const tipX = baseX + radial.x * bumpH
-      const tipY = baseY + radial.y * bumpH
+      const rad = radialUnit({ x: Math.cos(angle), y: Math.sin(angle) }, { x: 0, y: 0 })
+      const baseX = cx + Math.cos(angle) * R
+      const baseY = cy + Math.sin(angle) * R
+      const tipX = baseX + rad.x * bumpH
+      const tipY = baseY + rad.y * bumpH
       g.lineStyle(bumpW, COL_PLANET_RIM, 0.7)
       g.beginPath()
       g.moveTo(baseX, baseY)

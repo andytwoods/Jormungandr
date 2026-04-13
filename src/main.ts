@@ -3,12 +3,13 @@ import { BootScene } from './game/scenes/BootScene'
 import { GameScene } from './game/scenes/GameScene'
 import { TARGET_FPS } from './game/config'
 
-const config: Phaser.Types.Core.GameConfig = {
+const config: Phaser.Types.Core.GameConfig & { resolution?: number } = {
   type: Phaser.AUTO,
   backgroundColor: '#000000',
-  pixelArt: false,   // native resolution — no pixel scaling
+  pixelArt: false,
   antialias: true,
   roundPixels: false,
+  resolution: window.devicePixelRatio as number,
   fps: { target: TARGET_FPS, forceSetTimeOut: false },
   input: {
     activePointers: 3,

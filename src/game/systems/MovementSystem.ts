@@ -75,20 +75,4 @@ export function updateMovement(head: SerpentHead, input: InputState, dtSec: numb
   // --- Integrate ---
   pos.x += vel.x * dtSec
   pos.y += vel.y * dtSec
-
-  // --- Ceiling bounce ---
-  const postRadial = radialUnit(pos, CENTRE)
-  const postAlt = altitude(pos, CENTRE, PLANET_RADIUS)
-  if (postAlt > stats.playableAltMax) {
-    // Push position back inside ceiling
-    const excess = postAlt - stats.playableAltMax
-    pos.x -= postRadial.x * excess
-    pos.y -= postRadial.y * excess
-    // Reflect and dampen the outward radial velocity
-    const radialVel = dot(vel, postRadial)
-    if (radialVel > 0) {
-      vel.x -= postRadial.x * 1.5 * radialVel
-      vel.y -= postRadial.y * 1.5 * radialVel
-    }
-  }
 }
