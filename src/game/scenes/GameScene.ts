@@ -10,7 +10,7 @@ import { spawnFood, generateHazards, addHazard } from '../systems/SpawnSystem'
 import type { FoodItem, GameState, LavaBlob } from '../types'
 import {
   radialUnit, tangentUnit, angleFromCentre,
-  altitude, lerp, normalize
+  lerp, normalize
 } from '../utils/math'
 import type { BodySample } from '../types'
 import {
@@ -43,7 +43,6 @@ const COL_FOOD       = 0xffd700
 const COL_FOOD_GLOW  = 0xffaa00
 
 const COL_PULSE      = 0xffffff
-const COL_WARN_TINT  = 0x3a1800
 
 export class GameScene extends Phaser.Scene {
   private head!: SerpentHead
@@ -378,10 +377,8 @@ export class GameScene extends Phaser.Scene {
     const g = this.gfx
     g.clear()
 
-    const headAlt = altitude(this.head.position, CENTRE, PLANET_RADIUS)
-    const inWarningZone = headAlt > PLAYABLE_ALT_MAX * 0.82
-
-    this.renderBackground(g, inWarningZone)
+    this.renderBackground(g)
+    this.renderSkyBoundary(g)
     this.renderPlanet(g)
     this.renderHazards(g)
     this.renderLavaBlobs(g, nowMs)
@@ -392,11 +389,22 @@ export class GameScene extends Phaser.Scene {
     this.renderHead(g)
   }
 
-  private renderBackground(g: Phaser.GameObjects.Graphics, warn: boolean): void {
-    // Fill a large rect in world space with sky colour
-    const skyCol = warn ? COL_WARN_TINT : COL_SKY_LOW
-    g.fillStyle(skyCol)
+  private renderBackground(g: Phaser.GameObjects.Graphics): void {
+    g.fillStyle(COL_SKY_LOW)
     g.fillRect(-3000, -3000, 6000, 6000)
+  }
+
+  private renderSkyBoundary(g: Phaser.GameObjects.Graphics): void {
+    const boundaryR = PLANET_RADIUS + this.movementStats.playableAltMax
+    // Outer glow band
+    g.lineStyle(6, 0x4488cc, 0.08)
+    g.strokeCircle(CENTRE.x, CENTRE.y, boundaryR + 4)
+    // Main boundary line
+    g.lineStyle(1.5, 0x66aadd, 0.5)
+    g.strokeCircle(CENTRE.x, CENTRE.y, boundaryR)
+    // Inner accent
+    g.lineStyle(1, 0x3366aa, 0.25)
+    g.strokeCircle(CENTRE.x, CENTRE.y, boundaryR - 3)
   }
 
   private renderPlanet(g: Phaser.GameObjects.Graphics): void {
