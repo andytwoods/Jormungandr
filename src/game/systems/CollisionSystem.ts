@@ -2,8 +2,7 @@ import type { BodySample } from '../types'
 import type { HazardRuntime } from '../entities/Hazard'
 import { distance, altitude, circleOverlapsCapsule } from '../utils/math'
 import {
-  PLANET_RADIUS, HEAD_COLLISION_RADIUS, SAFE_NECK_SAMPLES,
-  FOOD_RADIUS
+  PLANET_RADIUS, HEAD_COLLISION_RADIUS, SAFE_NECK_SAMPLES
 } from '../config'
 
 const CENTRE = { x: 0, y: 0 }
@@ -47,11 +46,11 @@ export function checkDeath(
 export function checkFoodCollection(
   headX: number,
   headY: number,
-  foods: Array<{ x: number; y: number }>
+  foods: Array<{ x: number; y: number; radius: number }>
 ): number {
   const head = { x: headX, y: headY }
   for (let i = 0; i < foods.length; i++) {
-    if (distance(head, foods[i]) < HEAD_COLLISION_RADIUS + FOOD_RADIUS) {
+    if (distance(head, foods[i]) < HEAD_COLLISION_RADIUS + foods[i].radius) {
       return i
     }
   }

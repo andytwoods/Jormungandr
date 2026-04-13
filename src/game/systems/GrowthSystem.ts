@@ -12,9 +12,9 @@ export class GrowthSystem {
   private queue: GrowthEntry[] = []
   pulses: ActivePulse[] = []
 
-  onFoodEaten(nowMs: number): void {
+  onFoodEaten(nowMs: number, nutrition = 1): void {
     this.queue.push({
-      samplesRemaining: GROWTH_PER_FOOD,
+      samplesRemaining: GROWTH_PER_FOOD * nutrition,
       triggerTime: nowMs + GROWTH_DELAY_MS,
     })
     this.pulses.push({

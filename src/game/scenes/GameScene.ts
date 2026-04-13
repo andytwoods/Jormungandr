@@ -15,17 +15,34 @@ import {
 import type { BodySample } from '../types'
 import {
   PLANET_RADIUS, INITIAL_FOOD_COUNT, INITIAL_HAZARD_COUNT,
-  CAMERA_BASE_ZOOM, CAMERA_MAX_ZOOM_OUT, CAMERA_SMOOTHING,
-  INITIAL_BODY_SAMPLES, BODY_WIDTH_HEAD, BODY_WIDTH_TAIL,
-  FOOD_RADIUS, HAZARD_ADD_INTERVAL, HAZARD_SOFT_MAX,
+  CAMERA_BASE_ZOOM, CAMERA_SMOOTHING,
+  BODY_WIDTH_HEAD, BODY_WIDTH_TAIL,
+  HAZARD_ADD_INTERVAL, HAZARD_SOFT_MAX,
   PLAYABLE_ALT_MAX, MAX_SPEED, MIN_TANGENTIAL_SPEED, FOOD_LIFETIME_MS,
   LAVA_BLOB_SPEED, LAVA_BLOB_SPREAD, LAVA_BLOB_COUNT,
   LAVA_BLOB_RADIUS, LAVA_BLOB_LIFE_MS, LAVA_ERUPT_INTERVAL_MS,
-  GRAVITY
+  GRAVITY, CAMERA_ZOOM_MIN, CAMERA_ZOOM_FULL_SCORE,
+  MOON_X, MOON_Y, MOON_RADIUS, FOOD_TYPES
 } from '../config'
 
 const CENTRE = { x: 0, y: 0 }
 const SPAWN_ANGLE = Math.PI / 2  // bottom of planet
+
+// Fixed star field — generated once using golden-angle distribution
+const STARS: Array<{ x: number; y: number; r: number; alpha: number }> = (() => {
+  const out = []
+  for (let i = 0; i < 120; i++) {
+    const angle = i * 2.3999  // golden angle
+    const dist  = 600 + (i * 53) % 3200
+    out.push({
+      x: Math.cos(angle) * dist,
+      y: Math.sin(angle) * dist,
+      r: 0.5 + (i % 4) * 0.4,
+      alpha: 0.4 + (i % 5) * 0.12,
+    })
+  }
+  return out
+})()
 
 // Colours
 const COL_SKY_LOW      = 0x0a0a1a
@@ -39,8 +56,7 @@ const COL_BODY       = 0x3a8a1a
 const COL_BODY_DARK  = 0x2a5a0a
 const COL_HEAD       = 0x7fff00
 const COL_EYE        = 0x001a00
-const COL_FOOD       = 0xffd700
-const COL_FOOD_GLOW  = 0xffaa00
+
 
 const COL_PULSE      = 0xffffff
 
@@ -59,6 +75,7 @@ export class GameScene extends Phaser.Scene {
   private bestScore = 0
   private foodsSinceLastHazard = 0
   private movementStats: MovementStats = baseMovementStats()
+  private displayCeilingAlt = PLAYABLE_ALT_MAX  // smoothly lerped for rendering
 
   private gfx!: Phaser.GameObjects.Graphics
   private scoreText!: Phaser.GameObjects.Text
@@ -212,7 +229,7 @@ export class GameScene extends Phaser.Scene {
     this.movementStats = {
       maxSpeed:           MAX_SPEED            + f * 30,   // +30 speed per food
       minTangentialSpeed: MIN_TANGENTIAL_SPEED + f * 12,   // +12 orbital floor per food
-      playableAltMax:     PLAYABLE_ALT_MAX     + f * 10,   // +10 altitude ceiling per food
+      playableAltMax:     PLAYABLE_ALT_MAX     + f * 20,   // +20 altitude ceiling per food
     }
   }
 
@@ -279,10 +296,11 @@ export class GameScene extends Phaser.Scene {
     // Food collection
     const eaten = checkFoodCollection(this.head.position.x, this.head.position.y, this.foods)
     if (eaten >= 0) {
+      const nutrition = this.foods[eaten].nutrition
       this.foods.splice(eaten, 1)
       this.score++
       this.foodsSinceLastHazard++
-      this.growth.onFoodEaten(nowMs)
+      this.growth.onFoodEaten(nowMs, nutrition)
       this.recomputeStats()
       this.scoreText.setText(`score: ${this.score}`)
 
@@ -303,10 +321,12 @@ export class GameScene extends Phaser.Scene {
     // Update camera target
     this.camTarget.setPosition(this.head.position.x, this.head.position.y)
 
-    // Dynamic zoom: zoom out up to 15% as serpent grows
-    const growthFraction = Math.min(1, (this.body.visibleSampleCount - INITIAL_BODY_SAMPLES) / 80)
-    const zoomOutFactor = lerp(1.0, CAMERA_MAX_ZOOM_OUT / CAMERA_BASE_ZOOM, growthFraction)
-    const targetZoom = this.baseZoom * zoomOutFactor
+    // Smoothly expand ceiling display
+    this.displayCeilingAlt = lerp(this.displayCeilingAlt, this.movementStats.playableAltMax, 0.025)
+
+    // Zoom out as score grows — reveals moon progressively
+    const scoreFrac = Math.min(1, this.score / CAMERA_ZOOM_FULL_SCORE)
+    const targetZoom = lerp(this.baseZoom, CAMERA_ZOOM_MIN, scoreFrac * scoreFrac)
     this.currentZoom = lerp(this.currentZoom, targetZoom, 0.02)
     this.cameras.main.setZoom(this.currentZoom)
   }
@@ -326,6 +346,7 @@ export class GameScene extends Phaser.Scene {
     this.score = 0
     this.foodsSinceLastHazard = 0
     this.movementStats = baseMovementStats()
+    this.displayCeilingAlt = PLAYABLE_ALT_MAX
     this.lavaBlobs = []
     this.scoreText.setText('score: 0')
     this.deathPanel.setVisible(false)
@@ -378,6 +399,8 @@ export class GameScene extends Phaser.Scene {
     g.clear()
 
     this.renderBackground(g)
+    this.renderStars(g)
+    this.renderMoon(g)
     this.renderSkyBoundary(g)
     this.renderPlanet(g)
     this.renderHazards(g)
@@ -394,8 +417,67 @@ export class GameScene extends Phaser.Scene {
     g.fillRect(-3000, -3000, 6000, 6000)
   }
 
+  private renderStars(g: Phaser.GameObjects.Graphics): void {
+    for (const s of STARS) {
+      g.fillStyle(0xffffff, s.alpha)
+      g.fillCircle(s.x, s.y, s.r)
+    }
+  }
+
+  private renderMoon(g: Phaser.GameObjects.Graphics): void {
+    const mx = MOON_X, my = MOON_Y, R = MOON_RADIUS
+
+    // Outer atmospheric haze
+    g.fillStyle(0x8899aa, 0.08)
+    g.fillCircle(mx, my, R + 18)
+
+    // Base — dark grey
+    g.fillStyle(0x6a6a72)
+    g.fillCircle(mx, my, R)
+
+    // Sunlit face — lighter on upper-right
+    g.fillStyle(0x9a9aa8, 0.55)
+    g.fillCircle(mx + R * 0.18, my - R * 0.18, R * 0.88)
+
+    // Craters
+    const craters = [
+      { ox: -0.35, oy: -0.25, r: 0.18 },
+      { ox:  0.30, oy:  0.30, r: 0.22 },
+      { ox: -0.10, oy:  0.45, r: 0.12 },
+      { ox:  0.50, oy: -0.10, r: 0.14 },
+      { ox: -0.55, oy:  0.20, r: 0.10 },
+      { ox:  0.05, oy: -0.55, r: 0.16 },
+    ]
+    for (const c of craters) {
+      const cx = mx + c.ox * R, cy = my + c.oy * R, cr = c.r * R
+      // Crater shadow
+      g.fillStyle(0x3a3a42, 0.8)
+      g.fillCircle(cx, cy, cr)
+      // Crater rim highlight
+      g.lineStyle(1, 0xb0b0be, 0.5)
+      g.strokeCircle(cx - cr * 0.15, cy - cr * 0.15, cr)
+    }
+
+    // Dark mare regions (flat lava plains)
+    g.fillStyle(0x4a4a52, 0.5)
+    g.fillCircle(mx + R * 0.15, my + R * 0.1, R * 0.35)
+    g.fillStyle(0x4a4a52, 0.35)
+    g.fillCircle(mx - R * 0.25, my - R * 0.05, R * 0.22)
+
+    // Limb shadow (terminator edge — dark left side)
+    g.fillStyle(0x111118, 0.35)
+    g.fillCircle(mx - R * 0.28, my, R * 0.85)
+
+    // "Moon" label — tiny, fades in with zoom-out
+    const labelAlpha = Math.max(0, Math.min(1, (this.baseZoom - this.currentZoom) / (this.baseZoom - CAMERA_ZOOM_MIN) * 2 - 0.2))
+    if (labelAlpha > 0.05) {
+      g.lineStyle(1, 0x8899aa, labelAlpha * 0.6)
+      g.strokeCircle(mx, my, R + 10)
+    }
+  }
+
   private renderSkyBoundary(g: Phaser.GameObjects.Graphics): void {
-    const boundaryR = PLANET_RADIUS + this.movementStats.playableAltMax
+    const boundaryR = PLANET_RADIUS + this.displayCeilingAlt
     // Outer glow band
     g.lineStyle(6, 0x4488cc, 0.08)
     g.strokeCircle(CENTRE.x, CENTRE.y, boundaryR + 4)
@@ -722,17 +804,63 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private renderFood(g: Phaser.GameObjects.Graphics, _nowMs: number): void {
+  private renderFood(g: Phaser.GameObjects.Graphics, nowMs: number): void {
     for (const f of this.foods) {
-      // Outer glow
-      g.fillStyle(COL_FOOD_GLOW, 0.4)
-      g.fillCircle(f.x, f.y, FOOD_RADIUS + 4)
-      // Core
-      g.fillStyle(COL_FOOD)
-      g.fillCircle(f.x, f.y, FOOD_RADIUS)
-      // Specular highlight
-      g.fillStyle(0xffffff, 0.6)
-      g.fillCircle(f.x - 2, f.y - 2, 2)
+      const ft = FOOD_TYPES.find(t => t.type === f.foodType) ?? FOOD_TYPES[0]
+      const r = f.radius
+      const pulse = 1 + Math.sin(nowMs * 0.004 + f.id) * 0.12
+
+      if (f.foodType === 'small') {
+        // Simple glowing orb
+        g.fillStyle(ft.color, 0.3)
+        g.fillCircle(f.x, f.y, r * 1.8 * pulse)
+        g.fillStyle(ft.color)
+        g.fillCircle(f.x, f.y, r)
+        g.fillStyle(0xffffff, 0.7)
+        g.fillCircle(f.x - r * 0.3, f.y - r * 0.3, r * 0.3)
+
+      } else if (f.foodType === 'medium') {
+        // Fruit-like: outer glow + two-tone
+        g.fillStyle(ft.color, 0.25)
+        g.fillCircle(f.x, f.y, r * 1.9 * pulse)
+        g.fillStyle(ft.color)
+        g.fillCircle(f.x, f.y, r)
+        g.fillStyle(0xaaffcc, 0.6)
+        g.fillCircle(f.x + r * 0.2, f.y - r * 0.2, r * 0.55)
+        g.fillStyle(0xffffff, 0.8)
+        g.fillCircle(f.x - r * 0.3, f.y - r * 0.35, r * 0.25)
+        // Stem nub
+        g.fillStyle(0x336622)
+        g.fillRect(f.x - 1, f.y - r - 3, 2, 4)
+
+      } else {
+        // Large crystal: diamond polygon + inner sparkle
+        g.fillStyle(ft.color, 0.2)
+        g.fillCircle(f.x, f.y, r * 2.2 * pulse)
+        // Hexagonal crystal faces
+        g.fillStyle(ft.color, 0.9)
+        g.beginPath()
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2 - Math.PI / 6
+          if (i === 0) g.moveTo(f.x + Math.cos(a) * r, f.y + Math.sin(a) * r)
+          else         g.lineTo(f.x + Math.cos(a) * r, f.y + Math.sin(a) * r)
+        }
+        g.closePath()
+        g.fillPath()
+        // Inner lighter face
+        g.fillStyle(0xddaaff, 0.7)
+        g.beginPath()
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2 - Math.PI / 6
+          if (i === 0) g.moveTo(f.x + Math.cos(a) * r * 0.55, f.y + Math.sin(a) * r * 0.55)
+          else         g.lineTo(f.x + Math.cos(a) * r * 0.55, f.y + Math.sin(a) * r * 0.55)
+        }
+        g.closePath()
+        g.fillPath()
+        // Sparkle centre
+        g.fillStyle(0xffffff, 0.9)
+        g.fillCircle(f.x, f.y, r * 0.2)
+      }
     }
   }
 

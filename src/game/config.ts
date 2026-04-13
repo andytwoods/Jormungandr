@@ -17,8 +17,16 @@ export const SAFE_NECK_SAMPLES = 8       // samples behind head exempt from self
 export const PATH_BUFFER_SIZE = 4096     // ring buffer – pre-allocated, never grows
 
 // Growth
-export const GROWTH_PER_FOOD = 4         // body samples added per food eaten [TUNING]
+export const GROWTH_PER_FOOD = 8         // base body samples added per food eaten [TUNING]
 export const GROWTH_DELAY_MS = 350       // ms delay between eating and tail extension [TUNING]
+
+// Food types — weight is relative spawn probability
+export const FOOD_TYPES = [
+  { type: 'small'  as const, weight: 60, radius: 6,  nutrition: 1, color: 0xffd700 },
+  { type: 'medium' as const, weight: 30, radius: 10, nutrition: 2, color: 0x44dd88 },
+  { type: 'large'  as const, weight: 10, radius: 15, nutrition: 4, color: 0xaa66ff },
+] satisfies Array<{ type: string; weight: number; radius: number; nutrition: number; color: number }>
+export type FoodType = typeof FOOD_TYPES[number]['type']
 
 // Physics [TUNING]
 export const GRAVITY = 2000              // units/s² toward planet centre — strong enough that single button cannot maintain altitude
@@ -66,7 +74,14 @@ export const LAVA_ERUPT_INTERVAL_MS = 2800  // ms between eruptions
 // Camera
 export const CAMERA_SMOOTHING = 0.12
 export const CAMERA_BASE_ZOOM = 0.49    // px per world unit at 480×270
-export const CAMERA_MAX_ZOOM_OUT = 0.42 // minimum zoom (zoomed out furthest)
+export const CAMERA_MAX_ZOOM_OUT = 0.42 // unused legacy — zoom now driven by score
+export const CAMERA_ZOOM_MIN = 0.10     // fully zoomed out (moon clearly visible)
+export const CAMERA_ZOOM_FULL_SCORE = 30  // score at which max zoom-out is reached
+
+// Celestial bodies
+export const MOON_X = 400
+export const MOON_Y = -1300
+export const MOON_RADIUS = 110
 export const INTERNAL_WIDTH = 480
 export const INTERNAL_HEIGHT = 270
 
