@@ -4,8 +4,7 @@ export interface Vec2 {
 }
 
 export interface InputState {
-  leftHeld: boolean
-  rightHeld: boolean
+  upHeld: boolean
 }
 
 export interface BodySample {

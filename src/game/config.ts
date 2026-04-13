@@ -21,20 +21,20 @@ export const GROWTH_PER_FOOD = 4         // body samples added per food eaten [T
 export const GROWTH_DELAY_MS = 350       // ms delay between eating and tail extension [TUNING]
 
 // Physics [TUNING]
-export const GRAVITY = 1800              // units/s² toward planet centre — strong enough that single button cannot maintain altitude
+export const GRAVITY = 2000              // units/s² toward planet centre — strong enough that single button cannot maintain altitude
 export const THRUST_DIAGONAL = 2025      // magnitude for left/right thrust (radial component ~1432 < gravity — you fall while steering)
-export const THRUST_RADIAL = 3600        // magnitude for both-pressed thrust — the altitude rescue button (2× gravity = decisive pull-out)
+export const THRUST_RADIAL = 3000         // magnitude for up thrust — less than gravity so you can only slow a fall, not rocket upward
 export const THRUST_ANGLE_DEG = 45       // degrees from tangent toward radial — equal orbital/radial split
 export const DAMPING = 0.15              // velocity multiplier loss per second (genuinely mild)
-export const MAX_SPEED = 700             // units/s speed cap
-export const MIN_TANGENTIAL_SPEED = 40   // units/s floor — lower now that steering is more natural
+export const MAX_SPEED = 1000             // units/s speed cap
+export const MIN_TANGENTIAL_SPEED = 500  // units/s floor — keeps orbital speed feeling fast
 
 // Thin atmosphere (above PLAYABLE_ALT_MAX)
 export const THIN_ATMOSPHERE_THRUST_FACTOR = 0.15  // thrust efficiency above ceiling (tighter with stronger thrust)
 
 // Spawn
 export const SPAWN_ALTITUDE = 60
-export const SPAWN_INITIAL_SPEED = 200   // units/s initial clockwise tangential velocity
+export const SPAWN_INITIAL_SPEED = 350   // units/s initial clockwise tangential velocity
 export const SPAWN_SAFE_ARC_DEG = 30     // degrees around spawn angle kept clear of hazards
 
 // Food
