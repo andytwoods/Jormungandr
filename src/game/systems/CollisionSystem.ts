@@ -1,11 +1,10 @@
-import type { BodySample } from '../types'
+import type { BodySample, CelestialBody } from '../types'
 import type { HazardRuntime } from '../entities/Hazard'
-import { distance, altitude, circleOverlapsCapsule } from '../utils/math'
+import { distance, circleOverlapsCapsule } from '../utils/math'
 import {
-  PLANET_RADIUS, HEAD_COLLISION_RADIUS, SAFE_NECK_SAMPLES
+  HEAD_COLLISION_RADIUS, SAFE_NECK_SAMPLES
 } from '../config'
 
-const CENTRE = { x: 0, y: 0 }
 // Body capsule radius = mid-body width / 2 (approximation)
 const BODY_CAPSULE_RADIUS = 10
 
@@ -16,13 +15,15 @@ export function checkDeath(
   headX: number,
   headY: number,
   bodySamples: BodySample[],
-  hazards: HazardRuntime[]
+  hazards: HazardRuntime[],
+  bodies: readonly CelestialBody[]
 ): DeathCause | null {
   const head = { x: headX, y: headY }
 
-  // 1. Planet surface
-  const alt = altitude(head, CENTRE, PLANET_RADIUS)
-  if (alt <= 0) return 'surface'
+  // 1. Any celestial surface — solid whether or not its gravity has been unlocked
+  for (const b of bodies) {
+    if (distance(head, b) <= b.radius) return 'surface'
+  }
 
   // 2. Hazards (bounding circle check)
   for (const h of hazards) {

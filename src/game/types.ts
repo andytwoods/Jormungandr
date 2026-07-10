@@ -14,6 +14,16 @@ export interface BodySample {
 
 export type GameState = 'PLAYING' | 'DEAD'
 
+/** A gravitating, solid celestial body. Registry lives in config.ts. */
+export interface CelestialBody {
+  id: string
+  x: number
+  y: number
+  radius: number          // surface radius, world units
+  surfaceGravity: number  // units/s² at the surface
+  unlockScore: number     // gravity is inert below this score; the surface is always solid
+}
+
 export interface GrowthEntry {
   samplesRemaining: number
   triggerTime: number  // ms timestamp when growth resolves

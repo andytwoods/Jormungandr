@@ -4,10 +4,11 @@ import { SerpentBody } from '../entities/SerpentBody'
 import { buildHazardRuntime, type HazardRuntime } from '../entities/Hazard'
 import { InputSystem } from '../systems/InputSystem'
 import { updateMovement, baseMovementStats, type MovementStats } from '../systems/MovementSystem'
+import { netGravity, dominanceRadius } from '../systems/GravitySystem'
 import { GrowthSystem } from '../systems/GrowthSystem'
 import { checkDeath, checkFoodCollection } from '../systems/CollisionSystem'
 import { spawnFood, generateHazards, addHazard } from '../systems/SpawnSystem'
-import type { FoodItem, GameState, LavaBlob } from '../types'
+import type { CelestialBody, FoodItem, GameState, LavaBlob } from '../types'
 import {
   radialUnit, tangentUnit, angleFromCentre,
   lerp, normalize
@@ -21,13 +22,17 @@ import {
   PLAYABLE_ALT_MAX, MAX_SPEED, MIN_TANGENTIAL_SPEED, FOOD_LIFETIME_MS,
   LAVA_BLOB_SPEED, LAVA_BLOB_SPREAD, LAVA_BLOB_COUNT,
   LAVA_BLOB_RADIUS, LAVA_BLOB_LIFE_MS, LAVA_ERUPT_INTERVAL_MS,
-  GRAVITY, CAMERA_ZOOM_MIN, CAMERA_ZOOM_FULL_SCORE,
-  MOON_X, MOON_Y, MOON_RADIUS, MOON_GRAVITY, MOON_SOI, MOON_UNLOCK_SCORE,
-  HEAD_COLLISION_RADIUS, FOOD_TYPES
+  CAMERA_ZOOM_MIN, CAMERA_ZOOM_FULL_SCORE,
+  MOON_X, MOON_Y, MOON_RADIUS, MOON_UNLOCK_SCORE,
+  HEAD_COLLISION_RADIUS, FOOD_TYPES, BODIES
 } from '../config'
 
 const CENTRE = { x: 0, y: 0 }
 const SPAWN_ANGLE = Math.PI / 2  // bottom of planet
+
+// Radius at which the moon out-pulls Earth. Not a physics boundary — just the
+// landmark the player steers for, drawn where "down" actually flips.
+const MOON_DOMINANCE_RADIUS = dominanceRadius(BODIES.find(b => b.id === 'moon')!, BODIES)
 
 // Fixed star field — generated once using golden-angle distribution
 const STARS: Array<{ x: number; y: number; r: number; alpha: number }> = (() => {
@@ -190,7 +195,12 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private updateLava(nowMs: number, dtSec: number): void {
+  /** Bodies whose gravity is live at the current score. Surfaces stay solid regardless. */
+  private activeBodies(): CelestialBody[] {
+    return BODIES.filter(b => this.score >= b.unlockScore)
+  }
+
+  private updateLava(nowMs: number, dtSec: number, gravitySources: readonly CelestialBody[]): void {
     // Eruptions
     for (const h of this.hazards) {
       if (h.volcanoState !== 'active') continue
@@ -222,12 +232,12 @@ export class GameScene extends Phaser.Scene {
       const age = nowMs - b.spawnMs
       if (age > LAVA_BLOB_LIFE_MS) { this.lavaBlobs.splice(i, 1); continue }
 
-      // Gravity toward centre
-      const len = Math.sqrt(b.x * b.x + b.y * b.y) || 1
-      b.vx += -(b.x / len) * GRAVITY * dtSec
-      b.vy += -(b.y / len) * GRAVITY * dtSec
+      // Same gravity field the serpent flies in
+      const g = netGravity(b, gravitySources)
+      b.vx += g.x * dtSec
+      b.vy += g.y * dtSec
       b.x  += b.vx * dtSec
-      b.y  += b.y * dtSec
+      b.y  += b.vy * dtSec
 
       // Remove if hit surface
       if (Math.sqrt(b.x * b.x + b.y * b.y) < PLANET_RADIUS) {
@@ -279,35 +289,13 @@ export class GameScene extends Phaser.Scene {
     }
 
     const inputState = this.inputSys.getState()
-
-    // Determine active gravitational body for thrust and tangential speed calculations
-    let currentActiveCentre = { x: 0, y: 0 }; // Default to Earth
-    let currentActiveSurfaceRadius = PLANET_RADIUS;
-    let currentActiveGravity = GRAVITY;
-
-    if (this.score >= MOON_UNLOCK_SCORE) {
-      const mdx = this.head.position.x - MOON_X
-      const mdy = this.head.position.y - MOON_Y
-      const mdist = Math.sqrt(mdx * mdx + mdy * mdy)
-
-      if (mdist > 0 && mdist < MOON_SOI) {
-        // Serpent is within Moon's SOI, switch active body to Moon
-        currentActiveCentre = { x: MOON_X, y: MOON_Y };
-        currentActiveSurfaceRadius = MOON_RADIUS;
-        currentActiveGravity = MOON_GRAVITY; // This is for the thrust calculation, not the actual gravity application
-      }
-    }
-
-    // Update movementStats for the current frame
-    this.movementStats.activeCentre = currentActiveCentre;
-    this.movementStats.activeSurfaceRadius = currentActiveSurfaceRadius;
-    this.movementStats.activeGravity = currentActiveGravity;
+    const gravitySources = this.activeBodies()
 
     // Physics
-    updateMovement(this.head, inputState, dtSec, this.movementStats)
+    updateMovement(this.head, inputState, dtSec, this.movementStats, gravitySources)
 
     // Lava eruptions + blob physics
-    this.updateLava(nowMs, dtSec)
+    this.updateLava(nowMs, dtSec, gravitySources)
 
     // Push head position into body buffer
     this.body.push(this.head.position.x, this.head.position.y)
@@ -341,7 +329,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Surface + self-collision (hazards already handled above)
-    const cause = checkDeath(this.head.position.x, this.head.position.y, samples, [])
+    const cause = checkDeath(this.head.position.x, this.head.position.y, samples, [], BODIES)
     if (cause !== null) { this.triggerDeath(nowMs); return }
 
     const hx = this.head.position.x, hy = this.head.position.y
@@ -497,12 +485,6 @@ export class GameScene extends Phaser.Scene {
   private renderMoon(g: Phaser.GameObjects.Graphics): void {
     const mx = MOON_X, my = MOON_Y, R = MOON_RADIUS
 
-    // Sphere of influence — brightens once moon gravity is unlocked
-    const soiAlpha = this.score >= MOON_UNLOCK_SCORE ? 0.45 : 0.18
-    const soiCol   = this.score >= MOON_UNLOCK_SCORE ? 0x88ccff : 0x445566
-    g.lineStyle(this.score >= MOON_UNLOCK_SCORE ? 1.5 : 1, soiCol, soiAlpha)
-    g.strokeCircle(mx, my, MOON_SOI)
-
     // Thick layered atmosphere — 6 halos fading outward
     const atmoLayers = [
       { r: R + 90, a: 0.04, col: 0x99bbcc },
@@ -557,6 +539,12 @@ export class GameScene extends Phaser.Scene {
     // Orbital ring — always visible as a navigation beacon
     g.lineStyle(1, 0x8899aa, 0.4)
     g.strokeCircle(mx, my, R + 12)
+
+    // Dominance ring — cross it and the moon, not Earth, is what "down" means.
+    // Drawn over the atmosphere halos so it stays legible. Brightens once moon gravity is live.
+    const unlocked = this.score >= MOON_UNLOCK_SCORE
+    g.lineStyle(unlocked ? 1.5 : 1, unlocked ? 0x88ccff : 0x445566, unlocked ? 0.45 : 0.18)
+    g.strokeCircle(mx, my, MOON_DOMINANCE_RADIUS)
   }
 
   private renderSkyBoundary(g: Phaser.GameObjects.Graphics): void {

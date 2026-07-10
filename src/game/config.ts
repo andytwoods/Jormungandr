@@ -1,6 +1,8 @@
 // All tunable values live here. Never use magic numbers in logic files.
 // Values marked [TUNING] are the most likely to need adjustment in playtesting.
 
+import type { CelestialBody } from './types'
+
 // World
 export const PLANET_RADIUS = 220
 export const PLAYABLE_ALT_MIN = 40
@@ -29,16 +31,40 @@ export const FOOD_TYPES = [
 export type FoodType = typeof FOOD_TYPES[number]['type']
 
 // Physics [TUNING]
-export const GRAVITY = 2000              // units/s² toward planet centre — strong enough that single button cannot maintain altitude
+export const GRAVITY = 2000              // units/s² at Earth's surface
 export const THRUST_DIAGONAL = 2025      // magnitude for left/right thrust (radial component ~1432 < gravity — you fall while steering)
 export const THRUST_RADIAL = 3000         // magnitude for up thrust — less than gravity so you can only slow a fall, not rocket upward
 export const THRUST_ANGLE_DEG = 45       // degrees from tangent toward radial — equal orbital/radial split
 export const DAMPING = 0.15              // velocity multiplier loss per second (genuinely mild)
 export const MAX_SPEED = 1000             // units/s speed cap
 export const MIN_TANGENTIAL_SPEED = 500  // units/s floor — keeps orbital speed feeling fast
+export const TANGENTIAL_ASSIST_ACCEL = 3000  // units/s² the orbital floor may apply — a force, never a velocity injection
 
-// Thin atmosphere (above PLAYABLE_ALT_MAX)
-export const THIN_ATMOSPHERE_THRUST_FACTOR = 0.15  // thrust efficiency above ceiling (tighter with stronger thrust)
+// Gravity field shape [TUNING]. Below `radius * FALLOFF_START_MULT` a body pulls at a
+// flat `surfaceGravity`; beyond it the pull decays as (start / r) ** EXP.
+//
+// The flat inner zone is what keeps the playable ceiling meaningful — it is the field
+// the thrust and speed constants were tuned against. The decaying outer zone is what
+// lets a smaller body locally out-pull a larger one, which is the whole point: it is
+// what produces a handover instead of a hand-coded sphere of influence.
+//
+// EXP = 1 makes the outer potential logarithmic, so it is infinitely deep: no speed
+// escapes, however large. EXP = 2 (true inverse-square) makes escape possible at
+// sqrt(2 * GRAVITY * PLANET_RADIUS) ≈ 938 u/s, under MAX_SPEED. EXP = 0 disables
+// falloff entirely and no body can ever dominate another.
+export const GRAVITY_FALLOFF_EXP = 1
+export const GRAVITY_FALLOFF_START_MULT = 2  // Earth: flat out to r = 440, i.e. exactly the base ceiling
+
+// Thin atmosphere (above PLAYABLE_ALT_MAX of the *nearest* body)
+export const THIN_ATMOSPHERE_THRUST_FACTOR = 0.15  // thrust efficiency just above the ceiling
+export const ATMOSPHERE_SCALE_HEIGHT = 60   // thrust authority e-folds every this many units above the ceiling.
+                                            // Without this decay, thrust eventually out-pulls a falloff-1 gravity
+                                            // field and you can power away to infinity. It also means the only way
+                                            // off Earth is through another body's atmosphere — fly to the moon.
+
+// Orbital speed floor fades out where there is nothing to orbit (e.g. the point
+// between two bodies where their fields cancel).
+export const ASSIST_FADE_GRAVITY = 500     // field strength below which the floor loses authority
 
 // Spawn
 export const SPAWN_ALTITUDE = 60
@@ -83,8 +109,21 @@ export const MOON_UNLOCK_SCORE = 6    // score at which moon gravity kicks in [T
 export const MOON_X = 300
 export const MOON_Y = -900
 export const MOON_RADIUS = 130
-export const MOON_GRAVITY = 700         // units/s² at moon surface
-export const MOON_SOI = 580             // sphere of influence radius (gravitational pull range)
+export const MOON_GRAVITY = 1200        // units/s² at moon surface — tuned so the moon dominates
+                                        // out to ~248 units from its centre (~118 above its surface)
+
+/**
+ * Every gravitating body in the world. Gravity is the sum of all active entries —
+ * no sphere-of-influence switching, no blending. Add the sun (and anything else)
+ * here; nothing else needs to change.
+ *
+ * A body's surface is always solid, even before `unlockScore` makes its gravity active.
+ */
+export const BODIES: readonly CelestialBody[] = [
+  { id: 'earth', x: 0,      y: 0,      radius: PLANET_RADIUS, surfaceGravity: GRAVITY,      unlockScore: 0 },
+  { id: 'moon',  x: MOON_X, y: MOON_Y, radius: MOON_RADIUS,   surfaceGravity: MOON_GRAVITY, unlockScore: MOON_UNLOCK_SCORE },
+]
+
 export const INTERNAL_WIDTH = 480
 export const INTERNAL_HEIGHT = 270
 

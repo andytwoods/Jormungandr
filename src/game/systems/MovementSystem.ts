@@ -1,25 +1,21 @@
 import type { SerpentHead } from '../entities/SerpentHead'
-import type { InputState } from '../types'
+import type { CelestialBody, InputState } from '../types'
 import {
-  radialUnit, tangentUnit, length, normalize,
-  dot, altitude
+  radialUnit, tangentUnit, length, normalize, dot
 } from '../utils/math'
 import {
-  GRAVITY, THRUST_RADIAL,
-  DAMPING, MAX_SPEED, MIN_TANGENTIAL_SPEED,
-  PLANET_RADIUS, PLAYABLE_ALT_MAX, THIN_ATMOSPHERE_THRUST_FACTOR,
-  MOON_X, MOON_Y, MOON_RADIUS, MOON_GRAVITY, MOON_SOI
+  netGravity, dominantBody, minAltitude, surfaceOrbitSpeed, REFERENCE_ORBIT_SPEED
+} from './GravitySystem'
+import {
+  THRUST_RADIAL, DAMPING, MAX_SPEED, MIN_TANGENTIAL_SPEED,
+  PLAYABLE_ALT_MAX, THIN_ATMOSPHERE_THRUST_FACTOR, TANGENTIAL_ASSIST_ACCEL,
+  ATMOSPHERE_SCALE_HEIGHT, ASSIST_FADE_GRAVITY
 } from '../config'
 
 export interface MovementStats {
   maxSpeed: number
   minTangentialSpeed: number
   playableAltMax: number
-  // Active gravity body — set to moon when inside lunar SOI
-  activeCentre: { x: number; y: number }
-  activeSurfaceRadius: number
-  activeGravity: number // This is for thrust calculation
-  effectiveEarthGravity: number // New field for actual Earth gravity application
 }
 
 export function baseMovementStats(): MovementStats {
@@ -27,58 +23,44 @@ export function baseMovementStats(): MovementStats {
     maxSpeed: MAX_SPEED,
     minTangentialSpeed: MIN_TANGENTIAL_SPEED,
     playableAltMax: PLAYABLE_ALT_MAX,
-    activeCentre: { x: 0, y: 0 },
-    activeSurfaceRadius: PLANET_RADIUS,
-    activeGravity: GRAVITY, // Default thrust gravity
-    effectiveEarthGravity: GRAVITY, // Default actual Earth gravity
   }
 }
 
-export function updateMovement(head: SerpentHead, input: InputState, dtSec: number, stats: MovementStats): void {
+export function updateMovement(
+  head: SerpentHead,
+  input: InputState,
+  dtSec: number,
+  stats: MovementStats,
+  bodies: readonly CelestialBody[],
+): void {
   const { upHeld } = input
   const pos = head.position
   const vel = head.velocity
 
-  // --- Multi-body Gravity ---
+  // --- Gravity: every body, summed. No blending, no special cases. ---
+  const g = netGravity(pos, bodies)
+  vel.x += g.x * dtSec
+  vel.y += g.y * dtSec
 
-  // Moon gravity (inverse square) — computed first so we can blend Earth gravity
-  const moonPos = { x: MOON_X, y: MOON_Y };
-  const vecToMoonX = moonPos.x - pos.x;
-  const vecToMoonY = moonPos.y - pos.y;
-  const distToMoonCenterSq = vecToMoonX * vecToMoonX + vecToMoonY * vecToMoonY;
-  let moonInfluence = 0; // 0 = outside SOI, 1 = deep inside SOI
-  if (distToMoonCenterSq > 1) {
-    const distToMoonCenter = Math.sqrt(distToMoonCenterSq);
-    const gravityMagnitudeMoon = MOON_GRAVITY * (MOON_RADIUS * MOON_RADIUS) / distToMoonCenterSq;
-    const radialMoonX = vecToMoonX / distToMoonCenter;
-    const radialMoonY = vecToMoonY / distToMoonCenter;
-    vel.x += radialMoonX * gravityMagnitudeMoon * dtSec;
-    vel.y += radialMoonY * gravityMagnitudeMoon * dtSec;
-    // Blend factor: 0 at SOI edge, 1 at moon surface
-    if (distToMoonCenter < MOON_SOI) {
-      moonInfluence = Math.max(0, 1 - (distToMoonCenter - MOON_RADIUS) / (MOON_SOI - MOON_RADIUS));
-    }
-  }
+  // --- Thrust ---
+  // "Up" is away from whatever is pulling you, so it rotates smoothly as one body
+  // hands over to another instead of flipping. Where the field cancels there is no
+  // "down", so fall back to the dominant body's radial.
+  const dom = dominantBody(pos, bodies)
+  const gLen = length(g)
+  const up = gLen > 1e-4 ? { x: -g.x / gLen, y: -g.y / gLen } : radialUnit(pos, dom)
 
-  // Earth gravity — reduced smoothly as moon influence increases
-  const earthGravityScale = 1 - moonInfluence;
-  const radialEarth = radialUnit(pos, { x: 0, y: 0 });
-  vel.x -= radialEarth.x * stats.effectiveEarthGravity * earthGravityScale * dtSec;
-  vel.y -= radialEarth.y * stats.effectiveEarthGravity * earthGravityScale * dtSec;
-
-
-  const centre = stats.activeCentre
-
-  // Radial outward unit vector relative to active body (for thrust and other mechanics)
-  const radial = radialUnit(pos, centre)
-
-  // --- Thrust (radial from active body) ---
-  const alt = altitude(pos, centre, stats.activeSurfaceRadius)
-  const thrustFactor = alt > stats.playableAltMax ? THIN_ATMOSPHERE_THRUST_FACTOR : 1.0
+  // Thrust needs air. Above the nearest body's ceiling it drops to a fraction and then
+  // decays away entirely, so no amount of held thrust escapes to deep space. Approach
+  // another body and its atmosphere gives you back your engine.
+  const excessAlt = minAltitude(pos, bodies) - stats.playableAltMax
+  const thrustFactor = excessAlt <= 0
+    ? 1.0
+    : THIN_ATMOSPHERE_THRUST_FACTOR * Math.exp(-excessAlt / ATMOSPHERE_SCALE_HEIGHT)
 
   if (upHeld) {
-    vel.x += radial.x * THRUST_RADIAL * thrustFactor * dtSec
-    vel.y += radial.y * THRUST_RADIAL * thrustFactor * dtSec
+    vel.x += up.x * THRUST_RADIAL * thrustFactor * dtSec
+    vel.y += up.y * THRUST_RADIAL * thrustFactor * dtSec
   }
 
   // --- Damping ---
@@ -86,15 +68,25 @@ export function updateMovement(head: SerpentHead, input: InputState, dtSec: numb
   vel.x *= dampFactor
   vel.y *= dampFactor
 
-  // --- Minimum tangential speed floor (relative to active body) ---
+  // --- Orbital speed floor, around the dominant body ---
+  // Scaled to that body: the moon is smaller and weaker, so orbiting it should be
+  // slower than orbiting Earth. Applied as an acceleration and capped at the
+  // remaining deficit — as a direct velocity injection it would teleport the serpent
+  // sideways on the frame the dominant body (and so "tangential") changed.
+  // It also fades where the field is weak — at the point between two bodies where
+  // gravity cancels there is no orbit to hold, and a full-strength floor would just
+  // spin you as the tangent frame swaps over.
+  const radial = radialUnit(pos, dom)
   const cwTang = tangentUnit(radial, true)
+  const authority = Math.min(1, gLen / ASSIST_FADE_GRAVITY)
+  const floor = stats.minTangentialSpeed * (surfaceOrbitSpeed(dom) / REFERENCE_ORBIT_SPEED)
   const tangentialSpeed = dot(vel, cwTang)
-  const absSpeed = Math.abs(tangentialSpeed)
-  if (absSpeed < stats.minTangentialSpeed) {
+  const deficit = floor - Math.abs(tangentialSpeed)
+  if (deficit > 0 && authority > 0) {
     const sign = tangentialSpeed >= 0 ? 1 : -1
-    const deficit = (stats.minTangentialSpeed - absSpeed)
-    vel.x += cwTang.x * sign * deficit
-    vel.y += cwTang.y * sign * deficit
+    const dv = Math.min(deficit, TANGENTIAL_ASSIST_ACCEL * authority * dtSec)
+    vel.x += cwTang.x * sign * dv
+    vel.y += cwTang.y * sign * dv
   }
 
   // --- Speed cap ---
