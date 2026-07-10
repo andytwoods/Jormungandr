@@ -14,6 +14,11 @@ export class SerpentBody {
     this.pathY = new Float32Array(PATH_BUFFER_SIZE)
   }
 
+  /** Total body length in world units — what qualifies the serpent to eat a world. */
+  get length(): number {
+    return this.visibleSampleCount * BODY_SAMPLE_SPACING
+  }
+
   /** Push the current head position into the ring buffer each frame */
   push(x: number, y: number): void {
     this.pathX[this.writePtr] = x

@@ -97,12 +97,54 @@ export const LAVA_BLOB_RADIUS   = 6     // collision + visual radius
 export const LAVA_BLOB_LIFE_MS  = 3500  // max lifespan
 export const LAVA_ERUPT_INTERVAL_MS = 2800  // ms between eruptions
 
+// Gods — the Norse pantheon walking Midgard, hurling hammers and lightning at the World
+// Serpent. Lethal to the head until you outgrow them; then they become prey. [TUNING]
+export const GOD_INITIAL_COUNT = 3
+export const GOD_WALK_SPEED = 0.12          // rad/s surface patrol
+export const GOD_PATROL_HALF_ARC = 0.5      // rad each side of a god's home angle
+export const GOD_ATTACK_RANGE_DEG = 55      // serpent within this arc (and low) provokes an attack
+export const GOD_ATTACK_ALT_MAX = 240       // gods only strike a serpent below this altitude
+export const GOD_ATTACK_INTERVAL_MS = 2400  // base delay between a god's attacks
+export const GOD_COLLISION_RADIUS = 13      // figure body radius
+export const GOD_EAT_HEAD_RADIUS = 22       // head radius needed to devour a god (~score 11)
+export const GOD_NUTRITION = 4              // growth from eating a god
+export const GOD_STAND_HEIGHT = 9           // figure centre sits this far above the surface
+// Projectiles
+export const HAMMER_SPEED = 650
+export const HAMMER_RANGE = 520             // out-distance before Mjölnir boomerangs back
+export const HAMMER_RADIUS = 10
+export const BOLT_SPEED = 1000
+export const BOLT_RADIUS = 6
+export const BOLT_LIFE_MS = 2500
+export const GOD_JUMP_SPEED = 950           // radial launch speed of a leaping god
+export const GOD_PROJECTILE_LIFE_MS = 4200
+
 // Camera
 export const CAMERA_SMOOTHING = 0.12
 export const CAMERA_BASE_ZOOM = 0.49    // px per world unit at 480×270
 export const CAMERA_MAX_ZOOM_OUT = 0.42 // unused legacy — zoom now driven by score
-export const CAMERA_ZOOM_MIN = 0.10     // fully zoomed out (moon clearly visible)
-export const CAMERA_ZOOM_FULL_SCORE = 20  // score at which max zoom-out is reached
+export const CAMERA_ZOOM_MIN = 0.22     // fully zoomed out — moon stays in frame, surface keeps its detail
+export const CAMERA_ZOOM_FULL_SCORE = 28  // score at which max zoom-out is reached (spread over the longer endgame)
+
+// Devouring
+// A hazard is edible once the head's radius exceeds it. A *world* is edible once the
+// serpent is long enough to coil around it SWALLOW_COILS times — being long, not being
+// wide, is what qualifies you to eat a planet.
+export const SWALLOW_COILS = 5           // circumferences of body length needed to gulp a world whole [TUNING]
+export const SWALLOW_NUTRITION_PER_RADIUS = 0.09  // moon → 12 nutrition, Earth → 20 [TUNING]
+export const HAZARD_NUTRITION = 3        // nutrition from devouring a tree or volcano
+
+// Burrowing — the middle tier. Long enough to coil a world BURROW_COILS times (well short
+// of swallowing it whole) and you tunnel INTO it instead of dying: carving it away, feeding
+// as you go. Chew past BURROW_COLLAPSE_FRACTION of its area and the whole world collapses.
+export const BURROW_COILS = 2                    // coils of length to unlock burrowing [TUNING]
+export const BURROW_CARVE_RADIUS_MULT = 1.4      // tunnel radius relative to head radius
+export const BURROW_BITE_SPACING_MULT = 0.55     // carve a fresh bite once moved this × tunnel radius
+export const BURROW_NUTRITION_PER_BITE = 1       // growth per bite carved
+export const BURROW_COLLAPSE_FRACTION = 0.5      // fraction of a world's area to carve before it collapses
+// A hazard is swallowed once the head outgrows its GIRTH (width), not its full bounding
+// circle — a tall skinny tree shouldn't be as hard to eat as a fat volcano. Lower = eat sooner.
+export const HAZARD_EAT_GIRTH_FACTOR = 0.5
 
 // Celestial bodies
 export const MOON_UNLOCK_SCORE = 6    // score at which moon gravity kicks in [TUNING]
@@ -122,6 +164,8 @@ export const MOON_GRAVITY = 1200        // units/s² at moon surface — tuned s
 export const BODIES: readonly CelestialBody[] = [
   { id: 'earth', x: 0,      y: 0,      radius: PLANET_RADIUS, surfaceGravity: GRAVITY,      unlockScore: 0 },
   { id: 'moon',  x: MOON_X, y: MOON_Y, radius: MOON_RADIUS,   surfaceGravity: MOON_GRAVITY, unlockScore: MOON_UNLOCK_SCORE },
+  // Next rung: reachable once the moon is behind you. Drawn by the generic renderer.
+  { id: 'mars',  x: -1350,  y: -650,   radius: 95,            surfaceGravity: 800,          unlockScore: 14, color: 0xc1440e, name: 'Mars' },
 ]
 
 export const INTERNAL_WIDTH = 480
