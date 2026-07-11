@@ -49,7 +49,7 @@ export interface HazardItem {
   height: number    // world units (radial extent)
 }
 
-export type GodType = 'thor' | 'lightning' | 'jumper'
+export type GodType = 'thor' | 'lightning' | 'jumper' | 'martian'
 
 /** A god patrolling a planet's surface, attacking the serpent until it outgrows them. */
 export interface God {

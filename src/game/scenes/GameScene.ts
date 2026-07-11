@@ -14,7 +14,7 @@ import { spawnFood, generateHazards, addHazard } from '../systems/SpawnSystem'
 import {
   spawnGods, updateGods, updateGodProjectiles, godWorldPos
 } from '../entities/God'
-import type { CelestialBody, FoodItem, GameState, LavaBlob, God, GodProjectile, Ufo } from '../types'
+import type { CelestialBody, FoodItem, GameState, LavaBlob, God, GodProjectile, Ufo, Vec2 } from '../types'
 import {
   radialUnit, tangentUnit, angleFromCentre,
   lerp, normalize
@@ -35,10 +35,12 @@ import {
   GOD_INITIAL_COUNT, GOD_COLLISION_RADIUS, GOD_EAT_HEAD_RADIUS, GOD_NUTRITION,
   GOD_STAND_HEIGHT, HAMMER_RADIUS, BOLT_RADIUS,
   ISS_ALTITUDE, ISS_ANGULAR_SPEED, ISS_RADIUS, ISS_NUTRITION, ISS_RESPAWN_MS,
-  UFO_RADIUS, UFO_NUTRITION, UFO_SPEED, UFO_LIFE_MS, UFO_SPAWN_MIN_MS, UFO_SPAWN_MAX_MS
+  UFO_RADIUS, UFO_NUTRITION, UFO_SPEED, UFO_LIFE_MS, UFO_SPAWN_MIN_MS, UFO_SPAWN_MAX_MS,
+  MARS_X, MARS_Y, MARS_RADIUS, MARTIAN_COUNT
 } from '../config'
 
 const CENTRE = { x: 0, y: 0 }
+const MARS_CENTRE: Vec2 = { x: MARS_X, y: MARS_Y }
 const SPAWN_ANGLE = Math.PI / 2  // bottom of planet
 
 // Devour effects
@@ -103,6 +105,8 @@ export class GameScene extends Phaser.Scene {
   private lavaBlobs: LavaBlob[] = []
   private gods: God[] = []
   private godProjectiles: GodProjectile[] = []
+  private martians: God[] = []
+  private martianProjectiles: GodProjectile[] = []
   private nextGodId = 0
   private hasEatenGod = false
 
@@ -178,10 +182,8 @@ export class GameScene extends Phaser.Scene {
     this.foods = []
     this.spawnFoodBatch(INITIAL_FOOD_COUNT)
 
-    // Gods patrolling Midgard
-    this.gods = spawnGods(GOD_INITIAL_COUNT, this.nextGodId)
-    this.nextGodId += GOD_INITIAL_COUNT
-    this.godProjectiles = []
+    // Gods patrolling Midgard, Martians patrolling Mars
+    this.spawnInhabitants()
 
     // Orbital craft
     this.resetCraft()
@@ -385,6 +387,16 @@ export class GameScene extends Phaser.Scene {
   private bodyHeadWidth(): number { return BODY_WIDTH_HEAD + this.score * 2.5 }
   private bodyTailWidth(): number { return BODY_WIDTH_TAIL + this.score * 1.2 }
 
+  /** Spawn Earth's gods and Mars's Martians for a new run. */
+  private spawnInhabitants(): void {
+    this.gods = spawnGods(GOD_INITIAL_COUNT, this.nextGodId)
+    this.nextGodId += GOD_INITIAL_COUNT
+    this.godProjectiles = []
+    this.martians = spawnGods(MARTIAN_COUNT, this.nextGodId, ['martian', 'jumper'])
+    this.nextGodId += MARTIAN_COUNT
+    this.martianProjectiles = []
+  }
+
   /** Fresh orbital-craft state for a new run. */
   private resetCraft(): void {
     this.issAngle = Math.random() * Math.PI * 2
@@ -469,10 +481,14 @@ export class GameScene extends Phaser.Scene {
     // Lava eruptions + blob physics
     this.updateLava(nowMs, dtSec, gravitySources)
 
-    // Gods walk, leap, and hurl — only while Earth (their ground) still exists
+    // Inhabitants walk, leap, and hurl — each set only while its world still exists
     if (this.findBody('earth')) {
-      updateGods(this.gods, this.godProjectiles, this.head.position, CENTRE, nowMs, dtSec)
-      updateGodProjectiles(this.godProjectiles, this.gods, CENTRE, nowMs, dtSec)
+      updateGods(this.gods, this.godProjectiles, this.head.position, CENTRE, PLANET_RADIUS, nowMs, dtSec)
+      updateGodProjectiles(this.godProjectiles, this.gods, CENTRE, PLANET_RADIUS, nowMs, dtSec)
+    }
+    if (this.findBody('mars')) {
+      updateGods(this.martians, this.martianProjectiles, this.head.position, MARS_CENTRE, MARS_RADIUS, nowMs, dtSec)
+      updateGodProjectiles(this.martianProjectiles, this.martians, MARS_CENTRE, MARS_RADIUS, nowMs, dtSec)
     }
 
     // ISS orbit + UFO flybys
@@ -537,37 +553,10 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // A thrown hammer or bolt to the head is always lethal — dodge them
-    for (const p of this.godProjectiles) {
-      const pr = p.kind === 'hammer' ? HAMMER_RADIUS : BOLT_RADIUS
-      if (Math.hypot(hx - p.x, hy - p.y) < headRadius + pr) { this.triggerDeath(nowMs); return }
-    }
-
-    // The gods themselves: devour them once you've outgrown them, else a touch is death
-    const canEatGods = headRadius >= GOD_EAT_HEAD_RADIUS
-    for (let i = this.gods.length - 1; i >= 0; i--) {
-      const gp = godWorldPos(this.gods[i], CENTRE)
-      if (Math.hypot(hx - gp.x, hy - gp.y) < headRadius + GOD_COLLISION_RADIUS) {
-        if (canEatGods) {
-          const eatenType = this.gods[i].type
-          this.gods.splice(i, 1)
-          this.score++
-          this.growth.onFoodEaten(nowMs, GOD_NUTRITION)
-          this.recomputeStats()
-          this.scoreText.setText(`score: ${this.score}`)
-          this.addDevourRing(gp.x, gp.y, GOD_COLLISION_RADIUS * 1.5, nowMs)
-          this.cameras.main.shake(120, 0.006)
-          if (!this.hasEatenGod) {
-            this.hasEatenGod = true
-            this.showToast(eatenType === 'thor'
-              ? 'you have swallowed THOR\nthe thunderer is meat now'
-              : 'a god, devoured\nthey cannot stop you')
-          }
-        } else {
-          this.triggerDeath(nowMs); return
-        }
-      }
-    }
+    // Inhabitants of Earth and Mars: projectiles are always lethal; the walkers are prey
+    // once you've outgrown them, death by touch otherwise.
+    if (this.checkInhabitantHits(this.gods, this.godProjectiles, CENTRE, PLANET_RADIUS, nowMs) === 'dead') { this.triggerDeath(nowMs); return }
+    if (this.checkInhabitantHits(this.martians, this.martianProjectiles, MARS_CENTRE, MARS_RADIUS, nowMs) === 'dead') { this.triggerDeath(nowMs); return }
 
     // Orbital craft — harmless snacks. Catch the ISS or a UFO and gulp it down.
     if (this.issAlive && this.findBody('earth')) {
@@ -656,12 +645,16 @@ export class GameScene extends Phaser.Scene {
     this.addDevourRing(b.x, b.y, b.radius, nowMs)
     this.cameras.main.shake(600, 0.02)
 
-    // Eating Earth ends its surface life but not the game — the ladder continues outward
+    // Eating a populated world ends its surface life but not the game — the ladder continues
     if (b.id === 'earth') {
       this.hazards = []
       this.gods = []
       this.godProjectiles = []
       this.lavaBlobs = []
+    }
+    if (b.id === 'mars') {
+      this.martians = []
+      this.martianProjectiles = []
     }
 
     // The last world eaten is the finale — nothing left in the heavens to devour
@@ -708,6 +701,47 @@ export class GameScene extends Phaser.Scene {
     if (st.carvedArea >= worldArea * BURROW_COLLAPSE_FRACTION) {
       this.swallowBody(b, nowMs, Math.round(swallowNutrition(b) * 0.25))
     }
+  }
+
+  /**
+   * Head against one inhabitant set (gods on Earth, Martians on Mars) and their projectiles.
+   * Returns 'dead' if the serpent should die this frame; otherwise resolves any eats.
+   */
+  private checkInhabitantHits(
+    list: God[], projectiles: GodProjectile[], centre: Vec2, radius: number, nowMs: number
+  ): 'dead' | 'ok' {
+    const hx = this.head.position.x, hy = this.head.position.y
+    const headRadius = this.bodyHeadWidth() / 2
+
+    // Thrown hammer or bolt to the head is always lethal — dodge them
+    for (const p of projectiles) {
+      const pr = p.kind === 'hammer' ? HAMMER_RADIUS : BOLT_RADIUS
+      if (Math.hypot(hx - p.x, hy - p.y) < headRadius + pr) return 'dead'
+    }
+
+    const canEat = headRadius >= GOD_EAT_HEAD_RADIUS
+    for (let i = list.length - 1; i >= 0; i--) {
+      const gp = godWorldPos(list[i], centre, radius)
+      if (Math.hypot(hx - gp.x, hy - gp.y) < headRadius + GOD_COLLISION_RADIUS) {
+        if (!canEat) return 'dead'
+        const type = list[i].type
+        list.splice(i, 1)
+        this.score++
+        this.growth.onFoodEaten(nowMs, GOD_NUTRITION)
+        this.recomputeStats()
+        this.scoreText.setText(`score: ${this.score}`)
+        this.addDevourRing(gp.x, gp.y, GOD_COLLISION_RADIUS * 1.5, nowMs)
+        this.cameras.main.shake(120, 0.006)
+        if (!this.hasEatenGod) {
+          this.hasEatenGod = true
+          this.showToast(
+            type === 'thor' ? 'you have swallowed THOR\nthe thunderer is meat now'
+            : type === 'martian' ? 'a Martian, devoured\nthe red world is yours'
+            : 'a god, devoured\nthey cannot stop you')
+        }
+      }
+    }
+    return 'ok'
   }
 
   /** Shared reward for snapping up a small craft (ISS or UFO). */
@@ -761,6 +795,8 @@ export class GameScene extends Phaser.Scene {
     this.lavaBlobs = []
     this.gods = []
     this.godProjectiles = []
+    this.martians = []
+    this.martianProjectiles = []
     this.ufos = []
     this.issAlive = false
     this.toastText.setAlpha(0)
@@ -813,9 +849,7 @@ export class GameScene extends Phaser.Scene {
     this.hazards = hazardItems.map(h => buildHazardRuntime(h, CENTRE, PLANET_RADIUS))
     this.foods = []
     this.spawnFoodBatch(INITIAL_FOOD_COUNT)
-    this.gods = spawnGods(GOD_INITIAL_COUNT, this.nextGodId)
-    this.nextGodId += GOD_INITIAL_COUNT
-    this.godProjectiles = []
+    this.spawnInhabitants()
     this.resetCraft()
     this.currentZoom = this.baseZoom
     this.cameras.main.setZoom(this.baseZoom)
@@ -859,11 +893,16 @@ export class GameScene extends Phaser.Scene {
 
     this.renderBackground(g)
     this.renderStars(g)
-    // Bodies without a bespoke renderer (Mars and anything added later) draw generically
+    // Bodies without a bespoke renderer (Mars, its moons, Jupiter, the Sun) draw generically
     for (const b of this.bodies) {
       if (b.id === 'earth' || b.id === 'moon') continue
       this.renderGenericBody(g, b)
+      if (b.id === 'mars') this.renderOlympusMons(g, b)
       this.renderBites(g, b)
+      if (b.id === 'mars') {
+        this.renderGods(g, this.martians, { x: b.x, y: b.y }, b.radius, nowMs)
+        this.renderGodProjectiles(g, this.martianProjectiles)
+      }
     }
     const moon = this.findBody('moon')
     if (moon) { this.renderMoon(g); this.renderBites(g, moon) }
@@ -873,8 +912,8 @@ export class GameScene extends Phaser.Scene {
       this.renderPlanet(g)
       this.renderBites(g, earth)
       this.renderHazards(g, nowMs)
-      this.renderGods(g, nowMs)
-      this.renderGodProjectiles(g)
+      this.renderGods(g, this.gods, CENTRE, PLANET_RADIUS, nowMs)
+      this.renderGodProjectiles(g, this.godProjectiles)
       this.renderIss(g, nowMs)
     }
     this.renderUfos(g, nowMs)
@@ -1036,6 +1075,43 @@ export class GameScene extends Phaser.Scene {
     const r = (c >> 16) & 0xff, g = (c >> 8) & 0xff, b = c & 0xff
     const m = (v: number) => Math.max(0, Math.round(v * (1 - t)))
     return (m(r) << 16) | (m(g) << 8) | m(b)
+  }
+
+  /** Olympus Mons — the vast shield volcano, the solar system's tallest, on Mars's flank. */
+  private renderOlympusMons(g: Phaser.GameObjects.Graphics, b: CelestialBody): void {
+    const ang = -0.7  // fixed spot on Mars
+    const rad = { x: Math.cos(ang), y: Math.sin(ang) }
+    const tan = { x: -Math.sin(ang), y: Math.cos(ang) }
+    const R = b.radius
+    // Sink the base slightly below the surface so it always overlaps
+    const sink = R * 0.03
+    const bx = b.x + rad.x * (R - sink), by = b.y + rad.y * (R - sink)
+    const halfBase = R * 0.46      // very broad — a shield, not a cone
+    const height = R * 0.3
+    const topHalf = R * 0.16
+    const topX = bx + rad.x * height, topY = by + rad.y * height
+
+    // Shield body
+    g.fillStyle(this.darken(b.color ?? 0xc1440e, 0.35))
+    g.beginPath()
+    g.moveTo(bx - tan.x * halfBase, by - tan.y * halfBase)
+    g.lineTo(topX - tan.x * topHalf, topY - tan.y * topHalf)
+    g.lineTo(topX + tan.x * topHalf, topY + tan.y * topHalf)
+    g.lineTo(bx + tan.x * halfBase, by + tan.y * halfBase)
+    g.closePath(); g.fillPath()
+    // Lit flank
+    g.fillStyle(this.lighten(b.color ?? 0xc1440e, 0.15), 0.6)
+    g.beginPath()
+    g.moveTo(bx, by)
+    g.lineTo(bx + tan.x * halfBase, by + tan.y * halfBase)
+    g.lineTo(topX + tan.x * topHalf, topY + tan.y * topHalf)
+    g.lineTo(topX, topY)
+    g.closePath(); g.fillPath()
+    // Summit caldera
+    g.fillStyle(this.darken(b.color ?? 0xc1440e, 0.6))
+    g.fillCircle(topX, topY, topHalf * 0.7)
+    g.fillStyle(0x1a0a06)
+    g.fillCircle(topX, topY, topHalf * 0.4)
   }
 
   /**
@@ -1432,15 +1508,15 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  /** Little pixel gods standing on the surface; gold-rimmed once you can eat them. */
-  private renderGods(g: Phaser.GameObjects.Graphics, nowMs: number): void {
+  /** Pixel inhabitants standing on a host world (`centre`, `radius`); gold-rimmed once edible. */
+  private renderGods(g: Phaser.GameObjects.Graphics, list: God[], centre: Vec2, radius: number, nowMs: number): void {
     const canEat = this.bodyHeadWidth() / 2 >= GOD_EAT_HEAD_RADIUS
-    for (const god of this.gods) {
+    for (const god of list) {
       const rad = { x: Math.cos(god.angle), y: Math.sin(god.angle) }
       const tan = { x: -Math.sin(god.angle), y: Math.cos(god.angle) }
       const baseAlt = GOD_STAND_HEIGHT + god.altitude
-      const bx = CENTRE.x + rad.x * (PLANET_RADIUS + baseAlt)
-      const by = CENTRE.y + rad.y * (PLANET_RADIUS + baseAlt)
+      const bx = centre.x + rad.x * (radius + baseAlt)
+      const by = centre.y + rad.y * (radius + baseAlt)
       // Local frame: dx along the surface (tangent), dy up from it (radial)
       const up = (dx: number, dy: number) => ({ x: bx + tan.x * dx + rad.x * dy, y: by + tan.y * dx + rad.y * dy })
 
@@ -1451,9 +1527,12 @@ export class GameScene extends Phaser.Scene {
         g.strokeCircle(bx, by, GOD_COLLISION_RADIUS + 3)
       }
 
-      const robe = god.type === 'thor' ? 0x9a3b2e : god.type === 'lightning' ? 0x3355aa : 0x2e7d46
-      const skin = 0xe8c9a0
-      // Figure scale keyed to collision size, so bigger gods stay proportioned
+      const robe = god.type === 'thor' ? 0x9a3b2e
+        : god.type === 'lightning' ? 0x3355aa
+        : god.type === 'martian' ? 0x3aa33a
+        : 0x2e7d46
+      const skin = god.type === 'martian' ? 0x8fe08f : 0xe8c9a0
+      // Figure scale keyed to collision size, so bigger inhabitants stay proportioned
       const S = GOD_COLLISION_RADIUS / 12
       const u = (dx: number, dy: number) => up(dx * S, dy * S)
 
@@ -1502,6 +1581,22 @@ export class GameScene extends Phaser.Scene {
         g.fillCircle(tip.x, tip.y, 8 * S)
         g.fillStyle(0xccf0ff, glow)
         g.fillCircle(tip.x, tip.y, 4 * S)
+      } else if (god.type === 'martian') {
+        // Two antennae with glowing bulbs
+        const glow = 0.5 + Math.sin(nowMs * 0.012 + god.id) * 0.4
+        for (const s of [-1, 1]) {
+          const bulb = u(s * 3, 22)
+          g.lineStyle(1.5 * S, 0x2f7a2f, 1)
+          g.beginPath(); g.moveTo(shoulder.x, shoulder.y); g.lineTo(bulb.x, bulb.y); g.strokePath()
+          g.fillStyle(0xff5544, glow)
+          g.fillCircle(bulb.x, bulb.y, 2.2 * S)
+        }
+        // Ray gun in hand
+        const muzzle = u(9, 15)
+        g.lineStyle(2.5 * S, 0x556, 1)
+        g.beginPath(); g.moveTo(shR.x, shR.y); g.lineTo(muzzle.x, muzzle.y); g.strokePath()
+        g.fillStyle(0x9dff6a, glow * 0.5)
+        g.fillCircle(muzzle.x, muzzle.y, 3.5 * S)
       } else {
         // Jumper — a spring-line under it when airborne
         if (god.altitude > 4) {
@@ -1572,8 +1667,8 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private renderGodProjectiles(g: Phaser.GameObjects.Graphics): void {
-    for (const p of this.godProjectiles) {
+  private renderGodProjectiles(g: Phaser.GameObjects.Graphics, list: GodProjectile[]): void {
+    for (const p of list) {
       if (p.kind === 'hammer') {
         // Spinning Mjölnir with a motion glow
         const c = Math.cos(p.spin), s = Math.sin(p.spin)

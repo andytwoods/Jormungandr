@@ -168,6 +168,15 @@ export const MOON_RADIUS = 130
 export const MOON_GRAVITY = 1200        // units/s² at moon surface — tuned so the moon dominates
                                         // out to ~248 units from its centre (~118 above its surface)
 
+// Mars — a full second world: near Earth-size, its own gravity, two moons, Olympus Mons,
+// and Martians patrolling it. [TUNING]
+export const MARS_X = -1350
+export const MARS_Y = -650
+export const MARS_RADIUS = 200          // near Earth's 220
+export const MARS_GRAVITY = 1500
+export const MARS_UNLOCK_SCORE = 14
+export const MARTIAN_COUNT = 3          // Martians patrolling Mars
+
 /**
  * Every gravitating body in the world. Gravity is the sum of all active entries —
  * no sphere-of-influence switching, no blending. Add the sun (and anything else)
@@ -180,7 +189,9 @@ export const BODIES: readonly CelestialBody[] = [
   { id: 'moon',    x: MOON_X, y: MOON_Y, radius: MOON_RADIUS,   surfaceGravity: MOON_GRAVITY, unlockScore: MOON_UNLOCK_SCORE },
   // The ladder outward. Each becomes reachable (gravity unlocks) as you grow; all are drawn
   // from the start by the generic renderer as distant destinations. Positions/scales [TUNING].
-  { id: 'mars',    x: -1350,  y: -650,   radius: 95,  surfaceGravity: 800,  unlockScore: 14, color: 0xc1440e, name: 'Mars' },
+  { id: 'mars',    x: MARS_X, y: MARS_Y, radius: MARS_RADIUS, surfaceGravity: MARS_GRAVITY, unlockScore: MARS_UNLOCK_SCORE, color: 0xc1440e, name: 'Mars' },
+  { id: 'phobos',  x: MARS_X + 400, y: MARS_Y - 170, radius: 34, surfaceGravity: 520, unlockScore: 16, color: 0x8a6a55, name: 'Phobos' },
+  { id: 'deimos',  x: MARS_X - 340, y: MARS_Y + 320, radius: 24, surfaceGravity: 430, unlockScore: 16, color: 0x9c8a72, name: 'Deimos' },
   { id: 'jupiter', x: 2600,   y: 1500,   radius: 470, surfaceGravity: 1700, unlockScore: 30, color: 0xd8a878, name: 'Jupiter' },
   { id: 'sun',     x: -1200,  y: 4600,   radius: 820, surfaceGravity: 2600, unlockScore: 55, color: 0xffcc33, name: 'the Sun' },
 ]

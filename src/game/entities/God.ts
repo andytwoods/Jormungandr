@@ -4,19 +4,22 @@ import {
   GOD_WALK_SPEED, GOD_PATROL_HALF_ARC, GOD_ATTACK_RANGE_DEG, GOD_ATTACK_ALT_MAX,
   GOD_ATTACK_INTERVAL_MS, GOD_STAND_HEIGHT, GOD_JUMP_SPEED,
   HAMMER_SPEED, HAMMER_RANGE, BOLT_SPEED, BOLT_LIFE_MS, GOD_PROJECTILE_LIFE_MS,
-  GRAVITY, PLANET_RADIUS,
+  GRAVITY,
 } from '../config'
 
-const GOD_TYPES: GodType[] = ['thor', 'lightning', 'jumper']
+const EARTH_GOD_TYPES: GodType[] = ['thor', 'lightning', 'jumper']
 
-/** Gods scattered at random angles with random types — a different pantheon each run. */
-export function spawnGods(count: number, startId: number): God[] {
+/**
+ * Inhabitants scattered at random angles with random types — a different set each run.
+ * `types` restricts which kinds spawn (Earth's pantheon vs Martians on Mars).
+ */
+export function spawnGods(count: number, startId: number, types: GodType[] = EARTH_GOD_TYPES): God[] {
   const gods: God[] = []
   for (let i = 0; i < count; i++) {
     const homeAngle = Math.random() * Math.PI * 2
     gods.push({
       id: startId + i,
-      type: GOD_TYPES[Math.floor(Math.random() * GOD_TYPES.length)],
+      type: types[Math.floor(Math.random() * types.length)],
       angle: homeAngle,
       homeAngle,
       walkDir: Math.random() < 0.5 ? 1 : -1,
@@ -28,9 +31,9 @@ export function spawnGods(count: number, startId: number): God[] {
   return gods
 }
 
-/** World-space centre of a god's figure (accounts for a mid-leap altitude). */
-export function godWorldPos(g: God, centre: Vec2): Vec2 {
-  return orbitPoint(centre, PLANET_RADIUS, g.angle, GOD_STAND_HEIGHT + g.altitude)
+/** World-space centre of an inhabitant's figure on its host body (accounts for a mid-leap altitude). */
+export function godWorldPos(g: God, centre: Vec2, planetRadius: number): Vec2 {
+  return orbitPoint(centre, planetRadius, g.angle, GOD_STAND_HEIGHT + g.altitude)
 }
 
 function shortestAngleRad(a: number, b: number): number {
@@ -40,19 +43,22 @@ function shortestAngleRad(a: number, b: number): number {
 }
 
 /**
- * Patrol, leap physics, and attacks. Mutates `gods` and pushes new projectiles into
- * `projectiles`. Gods only strike when the serpent head is within their arc and flying low.
+ * Patrol, leap physics, and attacks for a set of inhabitants on one host body (`centre`,
+ * `planetRadius`). Mutates `gods` and pushes new projectiles. They only strike when the
+ * serpent head is within their arc and flying low over *their* world — so Martians ignore
+ * you while you're at Earth, and vice versa.
  */
 export function updateGods(
   gods: God[],
   projectiles: GodProjectile[],
   head: Vec2,
   centre: Vec2,
+  planetRadius: number,
   nowMs: number,
   dtSec: number,
 ): void {
   const headAngle = angleFromCentre(head, centre)
-  const headAlt = altOf(head, centre, PLANET_RADIUS)
+  const headAlt = altOf(head, centre, planetRadius)
   const rangeRad = (GOD_ATTACK_RANGE_DEG * Math.PI) / 180
 
   for (const g of gods) {
@@ -75,16 +81,18 @@ export function updateGods(
     const canReach = headAlt < GOD_ATTACK_ALT_MAX
     if (nowMs >= g.nextAttackMs && inArc && canReach && g.altitude <= 0) {
       g.nextAttackMs = nowMs + GOD_ATTACK_INTERVAL_MS + Math.random() * 1200
-      const from = godWorldPos(g, centre)
+      const from = godWorldPos(g, centre, planetRadius)
 
       if (g.type === 'jumper') {
         g.vAlt = GOD_JUMP_SPEED
       } else {
         const dx = head.x - from.x, dy = head.y - from.y
         const d = Math.hypot(dx, dy) || 1
-        const speed = g.type === 'thor' ? HAMMER_SPEED : BOLT_SPEED
+        // Thor throws the boomeranging hammer; lightning gods and Martians fire straight bolts
+        const isHammer = g.type === 'thor'
+        const speed = isHammer ? HAMMER_SPEED : BOLT_SPEED
         projectiles.push({
-          kind: g.type === 'thor' ? 'hammer' : 'bolt',
+          kind: isHammer ? 'hammer' : 'bolt',
           x: from.x, y: from.y,
           vx: (dx / d) * speed, vy: (dy / d) * speed,
           originX: from.x, originY: from.y,
@@ -100,13 +108,13 @@ export function updateGods(
 
 /**
  * Move projectiles. Mjölnir flies out, then boomerangs home to its thrower (homing on the
- * god's live position). Bolts fly straight and die on the surface or with age. Returns the
- * indices to remove (spent projectiles), leaving collision to the caller.
+ * thrower's live position). Bolts fly straight and die on the host surface or with age.
  */
 export function updateGodProjectiles(
   projectiles: GodProjectile[],
   gods: God[],
   centre: Vec2,
+  planetRadius: number,
   nowMs: number,
   dtSec: number,
 ): void {
@@ -124,7 +132,7 @@ export function updateGodProjectiles(
       }
       if (p.phase === 'back') {
         // Home toward the thrower's current hand; if they're gone, fall to the surface
-        const target = owner ? godWorldPos(owner, centre) : centre
+        const target = owner ? godWorldPos(owner, centre, planetRadius) : centre
         const dx = target.x - p.x, dy = target.y - p.y
         const d = Math.hypot(dx, dy) || 1
         p.vx = (dx / d) * HAMMER_SPEED
@@ -138,7 +146,7 @@ export function updateGodProjectiles(
       p.x += p.vx * dtSec
       p.y += p.vy * dtSec
       const distToCentre = Math.hypot(p.x - centre.x, p.y - centre.y)
-      if (distToCentre < PLANET_RADIUS || nowMs - p.spawnMs > BOLT_LIFE_MS) {
+      if (distToCentre < planetRadius || nowMs - p.spawnMs > BOLT_LIFE_MS) {
         projectiles.splice(i, 1)
       }
     }
