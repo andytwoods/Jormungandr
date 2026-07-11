@@ -35,8 +35,16 @@ export function canSwallow(b: CelestialBody, serpentLength: number): boolean {
   return serpentLength >= coilLengthRequired(b)
 }
 
-export function canBurrow(b: CelestialBody, serpentLength: number): boolean {
-  return serpentLength >= burrowLengthRequired(b)
+/**
+ * Whether the serpent can burrow into `b`.
+ *
+ * A reachable world (one with a gravity-unlock score) becomes burrowable the moment you can
+ * get there — reaching the moon means you can tunnel it. The home world (unlockScore ≤ 0) has
+ * no "arrival", so it stays length-gated: its surface keeps killing you until you're huge.
+ */
+export function canBurrow(b: CelestialBody, serpentLength: number, score: number): boolean {
+  if (b.unlockScore <= 0) return serpentLength >= burrowLengthRequired(b)
+  return score >= b.unlockScore
 }
 
 /** Growth payload for devouring a world — proportional to how much world there was. */
@@ -56,18 +64,19 @@ export function checkHeadContact(
   headY: number,
   bodySamples: BodySample[],
   bodies: readonly CelestialBody[],
-  serpentLength: number
+  serpentLength: number,
+  score: number
 ): Contact | null {
   const head = { x: headX, y: headY }
 
-  // 1. Celestial surfaces. Three tiers by how long the serpent is:
-  //    huge  → swallow the whole world in one gulp
-  //    mid   → burrow into it (the caller carves + feeds; not lethal)
-  //    small → the surface is still solid death
+  // 1. Celestial surfaces. Three tiers:
+  //    huge (coil-length)      → swallow the whole world in one gulp
+  //    reached / long enough   → burrow into it (the caller carves + feeds; not lethal)
+  //    otherwise               → the surface is still solid death
   for (const b of bodies) {
     if (distance(head, b) <= b.radius) {
-      if (canSwallow(b, serpentLength)) return { kind: 'swallow', body: b }
-      if (canBurrow(b, serpentLength))  return { kind: 'burrow', body: b }
+      if (canSwallow(b, serpentLength))        return { kind: 'swallow', body: b }
+      if (canBurrow(b, serpentLength, score))  return { kind: 'burrow', body: b }
       return { kind: 'death', cause: 'surface' }
     }
   }

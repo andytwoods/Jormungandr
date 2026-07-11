@@ -99,16 +99,16 @@ export const LAVA_ERUPT_INTERVAL_MS = 2800  // ms between eruptions
 
 // Gods — the Norse pantheon walking Midgard, hurling hammers and lightning at the World
 // Serpent. Lethal to the head until you outgrow them; then they become prey. [TUNING]
-export const GOD_INITIAL_COUNT = 3
+export const GOD_INITIAL_COUNT = 1
 export const GOD_WALK_SPEED = 0.12          // rad/s surface patrol
 export const GOD_PATROL_HALF_ARC = 0.5      // rad each side of a god's home angle
 export const GOD_ATTACK_RANGE_DEG = 55      // serpent within this arc (and low) provokes an attack
 export const GOD_ATTACK_ALT_MAX = 240       // gods only strike a serpent below this altitude
 export const GOD_ATTACK_INTERVAL_MS = 2400  // base delay between a god's attacks
-export const GOD_COLLISION_RADIUS = 13      // figure body radius
-export const GOD_EAT_HEAD_RADIUS = 22       // head radius needed to devour a god (~score 11)
+export const GOD_COLLISION_RADIUS = 24      // figure body radius (drives figure scale too)
+export const GOD_EAT_HEAD_RADIUS = 26       // head radius needed to devour a god (~score 14)
 export const GOD_NUTRITION = 4              // growth from eating a god
-export const GOD_STAND_HEIGHT = 9           // figure centre sits this far above the surface
+export const GOD_STAND_HEIGHT = 14          // figure centre sits this far above the surface
 // Projectiles
 export const HAMMER_SPEED = 650
 export const HAMMER_RANGE = 520             // out-distance before Mjölnir boomerangs back
@@ -118,6 +118,19 @@ export const BOLT_RADIUS = 6
 export const BOLT_LIFE_MS = 2500
 export const GOD_JUMP_SPEED = 950           // radial launch speed of a leaping god
 export const GOD_PROJECTILE_LIFE_MS = 4200
+
+// Orbital craft — harmless prey you can snap up for a small bonus. [TUNING]
+export const ISS_ALTITUDE = 160          // orbit height above Earth's surface
+export const ISS_ANGULAR_SPEED = 0.22    // rad/s around Earth
+export const ISS_RADIUS = 11             // collision + visual radius
+export const ISS_NUTRITION = 2
+export const ISS_RESPAWN_MS = 12000      // reappears this long after being eaten
+export const UFO_RADIUS = 10
+export const UFO_NUTRITION = 2
+export const UFO_SPEED = 320
+export const UFO_LIFE_MS = 9000          // despawns after this if not eaten
+export const UFO_SPAWN_MIN_MS = 7000     // random gap between flybys
+export const UFO_SPAWN_MAX_MS = 15000
 
 // Camera
 export const CAMERA_SMOOTHING = 0.12
@@ -140,8 +153,9 @@ export const HAZARD_NUTRITION = 3        // nutrition from devouring a tree or v
 export const BURROW_COILS = 2                    // coils of length to unlock burrowing [TUNING]
 export const BURROW_CARVE_RADIUS_MULT = 1.4      // tunnel radius relative to head radius
 export const BURROW_BITE_SPACING_MULT = 0.55     // carve a fresh bite once moved this × tunnel radius
-export const BURROW_NUTRITION_PER_BITE = 1       // growth per bite carved
-export const BURROW_COLLAPSE_FRACTION = 0.5      // fraction of a world's area to carve before it collapses
+// Fraction of a world's area to hollow (as swept tunnel area) before it collapses. Higher =
+// more tunnelling required. At 0.6 the moon takes roughly 2–3 full bores to eat. [TUNING]
+export const BURROW_COLLAPSE_FRACTION = 0.6
 // A hazard is swallowed once the head outgrows its GIRTH (width), not its full bounding
 // circle — a tall skinny tree shouldn't be as hard to eat as a fat volcano. Lower = eat sooner.
 export const HAZARD_EAT_GIRTH_FACTOR = 0.5
@@ -162,10 +176,13 @@ export const MOON_GRAVITY = 1200        // units/s² at moon surface — tuned s
  * A body's surface is always solid, even before `unlockScore` makes its gravity active.
  */
 export const BODIES: readonly CelestialBody[] = [
-  { id: 'earth', x: 0,      y: 0,      radius: PLANET_RADIUS, surfaceGravity: GRAVITY,      unlockScore: 0 },
-  { id: 'moon',  x: MOON_X, y: MOON_Y, radius: MOON_RADIUS,   surfaceGravity: MOON_GRAVITY, unlockScore: MOON_UNLOCK_SCORE },
-  // Next rung: reachable once the moon is behind you. Drawn by the generic renderer.
-  { id: 'mars',  x: -1350,  y: -650,   radius: 95,            surfaceGravity: 800,          unlockScore: 14, color: 0xc1440e, name: 'Mars' },
+  { id: 'earth',   x: 0,      y: 0,      radius: PLANET_RADIUS, surfaceGravity: GRAVITY,      unlockScore: 0 },
+  { id: 'moon',    x: MOON_X, y: MOON_Y, radius: MOON_RADIUS,   surfaceGravity: MOON_GRAVITY, unlockScore: MOON_UNLOCK_SCORE },
+  // The ladder outward. Each becomes reachable (gravity unlocks) as you grow; all are drawn
+  // from the start by the generic renderer as distant destinations. Positions/scales [TUNING].
+  { id: 'mars',    x: -1350,  y: -650,   radius: 95,  surfaceGravity: 800,  unlockScore: 14, color: 0xc1440e, name: 'Mars' },
+  { id: 'jupiter', x: 2600,   y: 1500,   radius: 470, surfaceGravity: 1700, unlockScore: 30, color: 0xd8a878, name: 'Jupiter' },
+  { id: 'sun',     x: -1200,  y: 4600,   radius: 820, surfaceGravity: 2600, unlockScore: 55, color: 0xffcc33, name: 'the Sun' },
 ]
 
 export const INTERNAL_WIDTH = 480

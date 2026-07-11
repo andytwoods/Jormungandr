@@ -14,7 +14,7 @@ import { spawnFood, generateHazards, addHazard } from '../systems/SpawnSystem'
 import {
   spawnGods, updateGods, updateGodProjectiles, godWorldPos
 } from '../entities/God'
-import type { CelestialBody, FoodItem, GameState, LavaBlob, God, GodProjectile } from '../types'
+import type { CelestialBody, FoodItem, GameState, LavaBlob, God, GodProjectile, Ufo } from '../types'
 import {
   radialUnit, tangentUnit, angleFromCentre,
   lerp, normalize
@@ -31,10 +31,11 @@ import {
   CAMERA_ZOOM_MIN, CAMERA_ZOOM_FULL_SCORE,
   MOON_X, MOON_Y, MOON_RADIUS, MOON_UNLOCK_SCORE,
   HEAD_COLLISION_RADIUS, FOOD_TYPES, BODIES, HAZARD_NUTRITION, SWALLOW_COILS,
-  BURROW_CARVE_RADIUS_MULT, BURROW_BITE_SPACING_MULT,
-  BURROW_NUTRITION_PER_BITE, BURROW_COLLAPSE_FRACTION,
+  BURROW_CARVE_RADIUS_MULT, BURROW_BITE_SPACING_MULT, BURROW_COLLAPSE_FRACTION,
   GOD_INITIAL_COUNT, GOD_COLLISION_RADIUS, GOD_EAT_HEAD_RADIUS, GOD_NUTRITION,
-  GOD_STAND_HEIGHT, HAMMER_RADIUS, BOLT_RADIUS
+  GOD_STAND_HEIGHT, HAMMER_RADIUS, BOLT_RADIUS,
+  ISS_ALTITUDE, ISS_ANGULAR_SPEED, ISS_RADIUS, ISS_NUTRITION, ISS_RESPAWN_MS,
+  UFO_RADIUS, UFO_NUTRITION, UFO_SPEED, UFO_LIFE_MS, UFO_SPAWN_MIN_MS, UFO_SPAWN_MAX_MS
 } from '../config'
 
 const CENTRE = { x: 0, y: 0 }
@@ -69,20 +70,11 @@ interface BurrowState {
 }
 
 // Fixed star field — generated once using golden-angle distribution
-const STARS: Array<{ x: number; y: number; r: number; alpha: number }> = (() => {
-  const out = []
-  for (let i = 0; i < 120; i++) {
-    const angle = i * 2.3999  // golden angle
-    const dist  = 600 + (i * 53) % 3200
-    out.push({
-      x: Math.cos(angle) * dist,
-      y: Math.sin(angle) * dist,
-      r: 0.5 + (i % 4) * 0.4,
-      alpha: 0.4 + (i % 5) * 0.12,
-    })
-  }
-  return out
-})()
+/** Deterministic 0..1 hash of an integer cell — for a starfield that tiles infinitely. */
+function starHash(n: number): number {
+  const s = Math.sin(n * 12.9898) * 43758.5453
+  return s - Math.floor(s)
+}
 
 // Colours
 const COL_SKY_LOW      = 0x0a0a1a
@@ -113,6 +105,13 @@ export class GameScene extends Phaser.Scene {
   private godProjectiles: GodProjectile[] = []
   private nextGodId = 0
   private hasEatenGod = false
+
+  // Orbital craft — the ISS circling Earth, and occasional UFO flybys
+  private issAngle = 0
+  private issAlive = true
+  private issRespawnMs = 0
+  private ufos: Ufo[] = []
+  private nextUfoMs = 0
 
   /** Live celestial bodies. Starts as a copy of BODIES; entries leave when devoured. */
   private bodies: CelestialBody[] = [...BODIES]
@@ -183,6 +182,9 @@ export class GameScene extends Phaser.Scene {
     this.gods = spawnGods(GOD_INITIAL_COUNT, this.nextGodId)
     this.nextGodId += GOD_INITIAL_COUNT
     this.godProjectiles = []
+
+    // Orbital craft
+    this.resetCraft()
 
     // Camera — zoom computed from actual camera height so planet fills ~80% regardless of screen size
     this.baseZoom = this.computeBaseZoom()
@@ -383,6 +385,54 @@ export class GameScene extends Phaser.Scene {
   private bodyHeadWidth(): number { return BODY_WIDTH_HEAD + this.score * 2.5 }
   private bodyTailWidth(): number { return BODY_WIDTH_TAIL + this.score * 1.2 }
 
+  /** Fresh orbital-craft state for a new run. */
+  private resetCraft(): void {
+    this.issAngle = Math.random() * Math.PI * 2
+    this.issAlive = true
+    this.issRespawnMs = 0
+    this.ufos = []
+    this.nextUfoMs = UFO_SPAWN_MIN_MS + Math.random() * (UFO_SPAWN_MAX_MS - UFO_SPAWN_MIN_MS)
+  }
+
+  /** World-space centre of the ISS on its Earth orbit. */
+  private issWorldPos(): { x: number; y: number } {
+    const r = PLANET_RADIUS + ISS_ALTITUDE
+    return { x: CENTRE.x + Math.cos(this.issAngle) * r, y: CENTRE.y + Math.sin(this.issAngle) * r }
+  }
+
+  /** Move the ISS along its orbit and drift/expire UFOs; spawn the occasional flyby. */
+  private updateCraft(nowMs: number, dtSec: number): void {
+    // ISS orbits only while Earth is there to orbit
+    if (this.findBody('earth')) {
+      this.issAngle += ISS_ANGULAR_SPEED * dtSec
+      if (!this.issAlive && nowMs >= this.issRespawnMs) this.issAlive = true
+    } else {
+      this.issAlive = false
+    }
+
+    // Occasional UFO flyby, launched from off-screen across the head's vicinity
+    if (nowMs >= this.nextUfoMs) {
+      this.nextUfoMs = nowMs + UFO_SPAWN_MIN_MS + Math.random() * (UFO_SPAWN_MAX_MS - UFO_SPAWN_MIN_MS)
+      const hx = this.head.position.x, hy = this.head.position.y
+      const inAng = Math.random() * Math.PI * 2
+      const dist = 700
+      const sx = hx + Math.cos(inAng) * dist, sy = hy + Math.sin(inAng) * dist
+      // Fly roughly across the head, offset so it passes by rather than straight at it
+      const toHead = Math.atan2(hy - sy, hx - sx) + (Math.random() - 0.5) * 0.9
+      this.ufos.push({
+        x: sx, y: sy,
+        vx: Math.cos(toHead) * UFO_SPEED, vy: Math.sin(toHead) * UFO_SPEED,
+        spawnMs: nowMs, phase: Math.random() * Math.PI * 2,
+      })
+    }
+    for (let i = this.ufos.length - 1; i >= 0; i--) {
+      const u = this.ufos[i]
+      if (nowMs - u.spawnMs > UFO_LIFE_MS) { this.ufos.splice(i, 1); continue }
+      u.x += u.vx * dtSec
+      u.y += u.vy * dtSec
+    }
+  }
+
   update(time: number, delta: number): void {
     const dtSec = delta / 1000
     const nowMs = time
@@ -424,6 +474,9 @@ export class GameScene extends Phaser.Scene {
       updateGods(this.gods, this.godProjectiles, this.head.position, CENTRE, nowMs, dtSec)
       updateGodProjectiles(this.godProjectiles, this.gods, CENTRE, nowMs, dtSec)
     }
+
+    // ISS orbit + UFO flybys
+    this.updateCraft(nowMs, dtSec)
 
     // Push head position into body buffer
     this.body.push(this.head.position.x, this.head.position.y)
@@ -470,7 +523,7 @@ export class GameScene extends Phaser.Scene {
     // Celestial surfaces + self-collision. A surface is only lethal while it is
     // bigger than you; once you can coil around it, it is food.
     const contact = checkHeadContact(
-      this.head.position.x, this.head.position.y, samples, this.bodies, this.body.length
+      this.head.position.x, this.head.position.y, samples, this.bodies, this.body.length, this.score
     )
     if (contact?.kind === 'death') { this.triggerDeath(nowMs); return }
     if (contact?.kind === 'swallow') { this.swallowBody(contact.body, nowMs, swallowNutrition(contact.body)); return }
@@ -513,6 +566,23 @@ export class GameScene extends Phaser.Scene {
         } else {
           this.triggerDeath(nowMs); return
         }
+      }
+    }
+
+    // Orbital craft — harmless snacks. Catch the ISS or a UFO and gulp it down.
+    if (this.issAlive && this.findBody('earth')) {
+      const iss = this.issWorldPos()
+      if (Math.hypot(hx - iss.x, hy - iss.y) < headRadius + ISS_RADIUS) {
+        this.issAlive = false
+        this.issRespawnMs = nowMs + ISS_RESPAWN_MS
+        this.eatCraft(iss.x, iss.y, ISS_RADIUS, ISS_NUTRITION, nowMs)
+      }
+    }
+    for (let i = this.ufos.length - 1; i >= 0; i--) {
+      const u = this.ufos[i]
+      if (Math.hypot(hx - u.x, hy - u.y) < headRadius + UFO_RADIUS) {
+        this.ufos.splice(i, 1)
+        this.eatCraft(u.x, u.y, UFO_RADIUS, UFO_NUTRITION, nowMs)
       }
     }
 
@@ -586,13 +656,30 @@ export class GameScene extends Phaser.Scene {
     this.addDevourRing(b.x, b.y, b.radius, nowMs)
     this.cameras.main.shake(600, 0.02)
 
-    if (b.id === 'earth') { this.triggerWin(); return }
-    this.showToast(`THE MOON IS EATEN\nonly the world remains`)
+    // Eating Earth ends its surface life but not the game — the ladder continues outward
+    if (b.id === 'earth') {
+      this.hazards = []
+      this.gods = []
+      this.godProjectiles = []
+      this.lavaBlobs = []
+    }
+
+    // The last world eaten is the finale — nothing left in the heavens to devour
+    if (this.bodies.length === 0) { this.triggerWin(); return }
+
+    const label = b.name ?? b.id
+    this.showToast(`${label.toUpperCase()} IS EATEN\nthe hunger grows`)
   }
 
   /**
-   * The head is inside `b` and long enough to burrow. Carve a cavity at the head, feed a
-   * trickle of growth, and — once enough of the world is chewed away — collapse it.
+   * The head is inside `b` and long enough to burrow. Carve a cavity at the head and — once
+   * enough of the world is hollowed out — collapse it. Burrowing does NOT grow the serpent;
+   * excavating a world is its own reward, paid at the collapse.
+   *
+   * Carved area is measured as the tunnel's *swept* area (path length × width), not the sum
+   * of each bite's disc. Overlapping bites along a straight bore would otherwise overcount
+   * wildly and collapse a world in a single pass.
+   *
    * The head is NOT stopped: gravity keeps pulling it toward the core, so it tunnels through.
    */
   private burrowInto(b: CelestialBody, nowMs: number): void {
@@ -605,26 +692,32 @@ export class GameScene extends Phaser.Scene {
 
     // Only lay a fresh bite once the head has moved far enough — bounds the count and
     // stops a stationary head from inflating carvedArea toward a free collapse.
-    const movedEnough = !st.hasBite ||
-      Math.hypot(hx - st.lastX, hy - st.lastY) > carveR * BURROW_BITE_SPACING_MULT
-    if (!movedEnough) return
+    const moved = st.hasBite ? Math.hypot(hx - st.lastX, hy - st.lastY) : 0
+    if (st.hasBite && moved <= carveR * BURROW_BITE_SPACING_MULT) return
 
     st.bites.push({ x: hx, y: hy, r: carveR })
-    st.carvedArea += Math.PI * carveR * carveR
+    // Swept area: the entry crater once, then a rectangular slab per step of tunnel
+    st.carvedArea += st.hasBite ? moved * 2 * carveR : Math.PI * carveR * carveR
     st.lastX = hx; st.lastY = hy; st.hasBite = true
 
-    // Feed as it eats through the crust
-    this.score += BURROW_NUTRITION_PER_BITE
-    this.growth.onFoodEaten(nowMs, BURROW_NUTRITION_PER_BITE)
-    this.recomputeStats()
-    this.scoreText.setText(`score: ${this.score}`)
+    // HUD reflects progress; no growth, no score for the act of digging
+    this.updatePreyHud()
 
-    // Enough of the world gone → it collapses. You already ate it bite by bite, so the
-    // collapse itself pays only a small finishing bonus, not the full-swallow payload.
+    // Enough of the world hollowed → it collapses. The collapse pays a modest finishing bonus.
     const worldArea = Math.PI * b.radius * b.radius
     if (st.carvedArea >= worldArea * BURROW_COLLAPSE_FRACTION) {
       this.swallowBody(b, nowMs, Math.round(swallowNutrition(b) * 0.25))
     }
+  }
+
+  /** Shared reward for snapping up a small craft (ISS or UFO). */
+  private eatCraft(x: number, y: number, radius: number, nutrition: number, nowMs: number): void {
+    this.score++
+    this.growth.onFoodEaten(nowMs, nutrition)
+    this.recomputeStats()
+    this.scoreText.setText(`score: ${this.score}`)
+    this.addDevourRing(x, y, radius * 1.6, nowMs)
+    this.cameras.main.shake(70, 0.004)
   }
 
   /** Progress toward the next world you can't yet fully swallow, and its burrow state. */
@@ -636,7 +729,7 @@ export class GameScene extends Phaser.Scene {
 
     if (!target) {
       this.preyText.setText(this.bodies.length ? 'every world is prey' : '')
-    } else if (canBurrow(target, len)) {
+    } else if (canBurrow(target, len, this.score)) {
       // Show how much of it is chewed away rather than coils — burrowing is the live goal
       const worldArea = Math.PI * target.radius * target.radius
       const eaten = Math.min(100, ((this.burrows[target.id]?.carvedArea ?? 0) /
@@ -649,7 +742,7 @@ export class GameScene extends Phaser.Scene {
 
     // Announce each tier the moment it opens, once per world per run
     for (const b of this.bodies) {
-      if (canBurrow(b, len) && !this.announcedBurrowable.has(b.id)) {
+      if (canBurrow(b, len, this.score) && !this.announcedBurrowable.has(b.id)) {
         this.announcedBurrowable.add(b.id)
         this.showToast(`you can now BURROW into the ${b.id}\ndive in and tunnel through`)
       }
@@ -663,14 +756,15 @@ export class GameScene extends Phaser.Scene {
   private triggerWin(): void {
     this.gameState = 'WON'
     if (this.score > this.bestScore) this.bestScore = this.score
-    // Nothing anchored to Earth survives Earth
     this.hazards = []
     this.foods = []
     this.lavaBlobs = []
     this.gods = []
     this.godProjectiles = []
+    this.ufos = []
+    this.issAlive = false
     this.toastText.setAlpha(0)
-    this.deathTitleText.setText('THE WORLD IS EATEN')
+    this.deathTitleText.setText('THE HEAVENS ARE DEVOURED')
     this.deathScoreText.setText(`score: ${this.score}`)
     this.deathBestText.setText(`best: ${this.bestScore}`)
     this.deathHintText.setText('tap or press space to begin again')
@@ -722,6 +816,7 @@ export class GameScene extends Phaser.Scene {
     this.gods = spawnGods(GOD_INITIAL_COUNT, this.nextGodId)
     this.nextGodId += GOD_INITIAL_COUNT
     this.godProjectiles = []
+    this.resetCraft()
     this.currentZoom = this.baseZoom
     this.cameras.main.setZoom(this.baseZoom)
   }
@@ -780,7 +875,9 @@ export class GameScene extends Phaser.Scene {
       this.renderHazards(g, nowMs)
       this.renderGods(g, nowMs)
       this.renderGodProjectiles(g)
+      this.renderIss(g, nowMs)
     }
+    this.renderUfos(g, nowMs)
     this.renderSwallowableHalos(g, nowMs)
     this.renderNextTargetBeacon(g, nowMs)
     this.renderLavaBlobs(g, nowMs)
@@ -793,14 +890,34 @@ export class GameScene extends Phaser.Scene {
   }
 
   private renderBackground(g: Phaser.GameObjects.Graphics): void {
+    // Fill the actual view (plus margin) so there's never bare black beyond a fixed rect,
+    // however far out the serpent flies or the camera zooms.
+    const v = this.cameras.main.worldView
+    const m = Math.max(v.width, v.height)
     g.fillStyle(COL_SKY_LOW)
-    g.fillRect(-3000, -3000, 6000, 6000)
+    g.fillRect(v.x - m, v.y - m, v.width + m * 2, v.height + m * 2)
   }
 
+  /**
+   * Infinite parallax-free starfield: a grid of cells covering the view, one hashed star per
+   * populated cell. Because it's generated from cell coordinates it tiles forever — deep space
+   * is always starry, never an empty void. Cell size scales with zoom to bound the star count.
+   */
   private renderStars(g: Phaser.GameObjects.Graphics): void {
-    for (const s of STARS) {
-      g.fillStyle(0xffffff, s.alpha)
-      g.fillCircle(s.x, s.y, s.r)
+    const v = this.cameras.main.worldView
+    const cell = Math.max(120, v.height / 26)
+    const i0 = Math.floor(v.x / cell) - 1, i1 = Math.floor((v.x + v.width) / cell) + 1
+    const j0 = Math.floor(v.y / cell) - 1, j1 = Math.floor((v.y + v.height) / cell) + 1
+    for (let i = i0; i <= i1; i++) {
+      for (let j = j0; j <= j1; j++) {
+        const h = starHash(i * 73856.1 + j * 19349.7)
+        if (h < 0.35) continue                       // ~2/3 of cells hold a star
+        const h2 = starHash(i * 12.3 + j * 78.2 + 7)
+        const sx = (i + starHash(i * 3.1 + j * 5.7)) * cell
+        const sy = (j + h2) * cell
+        g.fillStyle(0xffffff, 0.35 + h2 * 0.5)
+        g.fillCircle(sx, sy, 0.5 + h * 1.6)
+      }
     }
   }
 
@@ -1151,7 +1268,7 @@ export class GameScene extends Phaser.Scene {
         const pulse = 0.55 + Math.sin(nowMs * 0.005) * 0.25
         g.lineStyle(3, 0xffd700, pulse)
         g.strokeCircle(b.x, b.y, b.radius + 6)
-      } else if (canBurrow(b, len)) {
+      } else if (canBurrow(b, len, this.score)) {
         const pulse = 0.45 + Math.sin(nowMs * 0.006) * 0.2
         g.lineStyle(2, 0xff7722, pulse)
         g.strokeCircle(b.x, b.y, b.radius + 5)
@@ -1336,41 +1453,121 @@ export class GameScene extends Phaser.Scene {
 
       const robe = god.type === 'thor' ? 0x9a3b2e : god.type === 'lightning' ? 0x3355aa : 0x2e7d46
       const skin = 0xe8c9a0
+      // Figure scale keyed to collision size, so bigger gods stay proportioned
+      const S = GOD_COLLISION_RADIUS / 12
+      const u = (dx: number, dy: number) => up(dx * S, dy * S)
 
-      // Torso — a little trapezoid along the radial
-      const shoulder = up(0, 14), hipL = up(-4, 2), hipR = up(4, 2)
-      const shL = up(-3, 14), shR = up(3, 14)
+      // Legs
+      g.lineStyle(3 * S, this.darken(robe, 0.3), 1)
+      const legT = u(0, 2)
+      g.beginPath(); g.moveTo(legT.x, legT.y); g.lineTo(u(-3, -6).x, u(-3, -6).y); g.strokePath()
+      g.beginPath(); g.moveTo(legT.x, legT.y); g.lineTo(u(3, -6).x, u(3, -6).y); g.strokePath()
+
+      // Torso — a trapezoid along the radial
+      const shoulder = u(0, 15), hipL = u(-4, 2), hipR = u(4, 2)
+      const shL = u(-4, 14), shR = u(4, 14)
       g.fillStyle(robe)
       g.beginPath()
       g.moveTo(shL.x, shL.y); g.lineTo(shR.x, shR.y); g.lineTo(hipR.x, hipR.y); g.lineTo(hipL.x, hipL.y)
       g.closePath(); g.fillPath()
       // Head
       g.fillStyle(skin)
-      g.fillCircle(shoulder.x, shoulder.y, 3.5)
+      g.fillCircle(shoulder.x, shoulder.y, 4 * S)
+      // Simple helm/hair shadow
+      g.fillStyle(this.darken(robe, 0.2))
+      g.fillCircle(shoulder.x + rad.x * 2 * S, shoulder.y + rad.y * 2 * S, 4.2 * S)
+      g.fillStyle(skin)
+      g.fillCircle(shoulder.x, shoulder.y, 3.6 * S)
 
       if (god.type === 'thor') {
         // Mjölnir raised in hand (unless it's in flight)
         const inFlight = this.godProjectiles.some(p => p.kind === 'hammer' && p.ownerId === god.id)
         if (!inFlight) {
-          const hand = up(7, 15)
-          g.lineStyle(2, 0x6b4a2a, 1)
+          const hand = u(8, 17)
+          g.lineStyle(2.5 * S, 0x6b4a2a, 1)
           g.beginPath(); g.moveTo(shR.x, shR.y); g.lineTo(hand.x, hand.y); g.strokePath()
           g.fillStyle(0x9aa0a8)
-          g.fillRect(hand.x - 4, hand.y - 4, 8, 6)
+          const hw = 5 * S, hh = 3.5 * S
+          g.fillRect(hand.x - hw, hand.y - hh, hw * 2, hh * 2)
+          g.fillStyle(0xc8ccd2, 0.6)
+          g.fillRect(hand.x - hw, hand.y - hh, hw * 2, hh * 0.6)
         }
       } else if (god.type === 'lightning') {
         // Glowing staff
-        const tip = up(6, 20), grip = up(5, 4)
-        g.lineStyle(1.5, 0xcaa15a, 1)
+        const tip = u(6, 22), grip = u(5, 3)
+        g.lineStyle(2 * S, 0xcaa15a, 1)
         g.beginPath(); g.moveTo(grip.x, grip.y); g.lineTo(tip.x, tip.y); g.strokePath()
-        g.fillStyle(0x88ddff, 0.5 + Math.sin(nowMs * 0.01 + god.id) * 0.3)
-        g.fillCircle(tip.x, tip.y, 4)
+        const glow = 0.5 + Math.sin(nowMs * 0.01 + god.id) * 0.3
+        g.fillStyle(0x88ddff, glow * 0.4)
+        g.fillCircle(tip.x, tip.y, 8 * S)
+        g.fillStyle(0xccf0ff, glow)
+        g.fillCircle(tip.x, tip.y, 4 * S)
       } else {
         // Jumper — a spring-line under it when airborne
         if (god.altitude > 4) {
-          g.lineStyle(1, 0x66ff99, 0.4)
+          g.lineStyle(1.5 * S, 0x66ff99, 0.4)
           g.beginPath(); g.moveTo(hipL.x, hipL.y); g.lineTo(bx - rad.x * god.altitude, by - rad.y * god.altitude); g.strokePath()
         }
+      }
+    }
+  }
+
+  /** The ISS on its orbit — a little truss with solar panels, banking along its path. */
+  private renderIss(g: Phaser.GameObjects.Graphics, nowMs: number): void {
+    if (!this.issAlive) return
+    const p = this.issWorldPos()
+    // Orbit tangent = facing direction
+    const fa = this.issAngle + Math.PI / 2
+    const fx = Math.cos(fa), fy = Math.sin(fa)
+    const nx = -fy, ny = fx
+    const S = ISS_RADIUS / 11
+
+    // Faint orbit hint
+    g.lineStyle(1, 0x88ccff, 0.12)
+    g.strokeCircle(CENTRE.x, CENTRE.y, PLANET_RADIUS + ISS_ALTITUDE)
+
+    // Truss
+    g.lineStyle(2.5 * S, 0xcfd4da, 1)
+    g.beginPath(); g.moveTo(p.x - fx * 10 * S, p.y - fy * 10 * S); g.lineTo(p.x + fx * 10 * S, p.y + fy * 10 * S); g.strokePath()
+    // Core module
+    g.fillStyle(0xe8ecf0)
+    g.fillCircle(p.x, p.y, 3.5 * S)
+    // Solar panels — two dark-blue wings on the cross axis
+    g.fillStyle(0x2a3f7a)
+    for (const s of [1, -1]) {
+      const cx = p.x + nx * s * 9 * S, cy = p.y + ny * s * 9 * S
+      g.fillRect(cx - 6 * S, cy - 3 * S, 12 * S, 6 * S)
+    }
+    g.fillStyle(0x5a7fd0, 0.5)
+    for (const s of [1, -1]) {
+      const cx = p.x + nx * s * 9 * S, cy = p.y + ny * s * 9 * S
+      g.fillRect(cx - 6 * S, cy - 3 * S, 12 * S, 1.5 * S)
+    }
+    // Blinking beacon
+    if (Math.sin(nowMs * 0.006) > 0.6) { g.fillStyle(0xff5555, 0.9); g.fillCircle(p.x + fx * 10 * S, p.y + fy * 10 * S, 1.6 * S) }
+  }
+
+  private renderUfos(g: Phaser.GameObjects.Graphics, nowMs: number): void {
+    for (const u of this.ufos) {
+      const bob = Math.sin(nowMs * 0.005 + u.phase) * 2
+      const cx = u.x, cy = u.y + bob
+      const S = UFO_RADIUS / 10
+      // Glow
+      g.fillStyle(0x66ffcc, 0.12)
+      g.fillCircle(cx, cy, 14 * S)
+      // Saucer body
+      g.fillStyle(0x8892a0)
+      g.fillEllipse(cx, cy, 22 * S, 8 * S)
+      g.fillStyle(0xb8c0cc)
+      g.fillEllipse(cx, cy - 1 * S, 22 * S, 4 * S)
+      // Dome
+      g.fillStyle(0x9fe8ff, 0.9)
+      g.fillCircle(cx, cy - 3 * S, 5 * S)
+      // Under-lights
+      for (let i = -1; i <= 1; i++) {
+        const on = Math.sin(nowMs * 0.012 + i + u.phase) > 0
+        g.fillStyle(on ? 0xffe066 : 0x556, on ? 0.95 : 0.5)
+        g.fillCircle(cx + i * 7 * S, cy + 4 * S, 1.6 * S)
       }
     }
   }

@@ -80,6 +80,16 @@ export interface GodProjectile {
   spin: number           // accumulated rotation for rendering
 }
 
+/** A UFO drifting across space — harmless, eatable flavour. */
+export interface Ufo {
+  x: number
+  y: number
+  vx: number
+  vy: number
+  spawnMs: number
+  phase: number   // seeds the bobbing wobble
+}
+
 export type VolcanoState = 'dormant' | 'simmering' | 'active'
 
 export interface LavaBlob {

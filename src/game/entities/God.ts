@@ -7,22 +7,22 @@ import {
   GRAVITY, PLANET_RADIUS,
 } from '../config'
 
-const GOD_CYCLE: GodType[] = ['thor', 'lightning', 'jumper']
+const GOD_TYPES: GodType[] = ['thor', 'lightning', 'jumper']
 
-/** Even spread of gods around the equator, one of each type in turn. */
+/** Gods scattered at random angles with random types — a different pantheon each run. */
 export function spawnGods(count: number, startId: number): God[] {
   const gods: God[] = []
   for (let i = 0; i < count; i++) {
-    const homeAngle = (i / count) * Math.PI * 2 + 0.4
+    const homeAngle = Math.random() * Math.PI * 2
     gods.push({
       id: startId + i,
-      type: GOD_CYCLE[i % GOD_CYCLE.length],
+      type: GOD_TYPES[Math.floor(Math.random() * GOD_TYPES.length)],
       angle: homeAngle,
       homeAngle,
-      walkDir: i % 2 === 0 ? 1 : -1,
+      walkDir: Math.random() < 0.5 ? 1 : -1,
       altitude: 0,
       vAlt: 0,
-      nextAttackMs: 1500 + i * 700,
+      nextAttackMs: 1200 + Math.random() * 2500,
     })
   }
   return gods
